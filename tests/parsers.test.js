@@ -270,7 +270,14 @@ check("dakikaya çevirme", DU.toMinutes("14:30") === 870);
 check("koltuk no", DU.extractSeatNo("Koltuk 12A") === "12A", DU.extractSeatNo("Koltuk 12A"));
 check("normalize", DU.normalize("  EKONOMİ  ") === DU.normalize("ekonomi"));
 
-/* ---- Örnek 4: şablon yamalama ---- */
+/* ---- Örnek 3d: sefer saati eşleşmesi ---- */
+const exactTimes = { times: ["11:10", "12:20"], timeFrom: "00:00", timeTo: "23:59" };
+check("seçili sefer saati eşleşiyor", D.matchesTime("11:10", exactTimes) === true);
+check("seçilmeyen sefer elenir", D.matchesTime("11:50", exactTimes) === false);
+check("aralık modu (seçim yok)", D.matchesTime("11:50", { times: [], timeFrom: "11:00", timeTo: "12:00" }) === true);
+check("aralık dışı elenir", D.matchesTime("12:20", { times: [], timeFrom: "11:00", timeTo: "12:00" }) === false);
+
+/* ---- Örnek 4: şablon yamalama ve uç nokta çözümleme ---- */
 (async () => {
   sandbox.chrome.storage.local.get = async (keys) => ({
     tcdd_templates: {
@@ -315,6 +322,23 @@ check("normalize", DU.normalize("  EKONOMİ  ") === DU.normalize("ekonomi"));
   });
   check("şablonsuz varsayılan gövde", fallback.searchRoutes[0].departureDate === "01-12-2026 00:00:00", fallback.searchRoutes[0].departureDate);
   check("yolcu sayısı gövdeye yazıldı", fallback.passengerTypeCounts[0].count === 3);
+
+  /* ---- Uç nokta çözümleme: yakalanan URL tahmine tercih edilmeli ---- */
+  sandbox.chrome.storage.local.get = async () => ({
+    tcdd_templates: {
+      availability: { url: "https://web-api-prod-ytp.tcddtasimacilik.gov.tr/tms/gercek/yol", body: {} }
+    }
+  });
+  const ep = await D.resolveEndpoint("availability", "/tms/tahmini/yol");
+  check(
+    "yakalanan URL kullanılıyor",
+    ep.url === "https://web-api-prod-ytp.tcddtasimacilik.gov.tr/tms/gercek/yol" && ep.source === "yakalanan",
+    ep
+  );
+
+  sandbox.chrome.storage.local.get = async () => ({ tcdd_headers_meta: { apiBase: "https://api.ornek" } });
+  const ep2 = await D.resolveEndpoint("availability", "/tms/tahmini/yol");
+  check("şablon yoksa yedek yol", ep2.url === "https://api.ornek/tms/tahmini/yol" && ep2.source === "varsayılan", ep2);
 
   console.log(failed ? `\n${failed} test BAŞARISIZ` : "\nTüm testler geçti");
   process.exit(failed ? 1 : 0);

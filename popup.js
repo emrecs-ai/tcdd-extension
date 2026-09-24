@@ -46,11 +46,26 @@
     chipAuth: $("chipAuth"),
     chipXsrf: $("chipXsrf"),
     chipCaptcha: $("chipCaptcha"),
+    chipEndpoint: $("chipEndpoint"),
     tokenHint: $("tokenHint"),
     stats: $("stats"),
     log: $("log"),
-    stationList: $("stationList")
+    stationList: $("stationList"),
+    timetableWrap: $("timetableWrap"),
+    timetableLabel: $("timetableLabel"),
+    timetableHint: $("timetableHint"),
+    timeChips: $("timeChips"),
+    btnTimesAll: $("btnTimesAll"),
+    btnTimesNone: $("btnTimesNone"),
+    timeFromField: $("timeFromField"),
+    timeToField: $("timeToField")
   };
+
+  /** Tarifeden seçilen sefer saatleri. Boşsa saat aralığı kullanılır. */
+  let selectedTimes = new Set();
+
+  /** Taramalardan öğrenilmiş tarifeler: { "<fromId>-<toId>": { label, times } } */
+  let learnedTimetables = {};
 
   /* ====================================================================== */
   /* Yardımcılar                                                            */
@@ -79,18 +94,101 @@
   }
 
   /* ====================================================================== */
+  /* Vagon tipleri ve tarife                                                */
+  /* ====================================================================== */
+
+  function renderCabinClasses() {
+    els.cabinClass.innerHTML = "";
+    for (const c of CFG.CABIN_CLASSES) {
+      const opt = document.createElement("option");
+      opt.value = c.value;
+      opt.textContent = c.label;
+      els.cabinClass.appendChild(opt);
+    }
+  }
+
+  /**
+   * Seçili güzergâhın tarifesi.
+   * Önce yapılandırmadaki sabit tarife, yoksa önceki taramalardan öğrenilen
+   * kalkış saatleri kullanılır; ikisi de yoksa saat aralığına düşülür.
+   */
+  function currentTimetable() {
+    const key = `${els.fromId.value}-${els.toId.value}`;
+    const known = CFG.KNOWN_TIMETABLES[key];
+    const learned = learnedTimetables[key];
+
+    if (known && learned) {
+      const times = Array.from(new Set(known.times.concat(learned.times || []))).sort();
+      return { label: known.label, times };
+    }
+    if (known) return known;
+    if (learned && learned.times && learned.times.length) {
+      return { label: (learned.label || "Önceki taramalardan") + " (öğrenildi)", times: learned.times };
+    }
+    return null;
+  }
+
+  /**
+   * Tarifeli güzergâhta sefer saatleri doğrudan seçilir; tanımlı tarife yoksa
+   * "en erken / en geç" aralığı gösterilir.
+   */
+  function renderTimetable() {
+    const tt = currentTimetable();
+    const hasTt = !!(tt && tt.times && tt.times.length);
+
+    els.timetableWrap.hidden = !hasTt;
+    els.timeFromField.hidden = hasTt;
+    els.timeToField.hidden = hasTt;
+
+    if (!hasTt) {
+      selectedTimes.clear();
+      return;
+    }
+
+    els.timetableLabel.textContent = tt.label || "Sefer saatleri";
+
+    // Tarifede olmayan eski seçimleri temizle
+    for (const t of Array.from(selectedTimes)) {
+      if (!tt.times.includes(t)) selectedTimes.delete(t);
+    }
+
+    els.timeChips.innerHTML = "";
+    for (const time of tt.times) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip-time" + (selectedTimes.has(time) ? " on" : "");
+      chip.textContent = time;
+      chip.addEventListener("click", () => {
+        if (selectedTimes.has(time)) selectedTimes.delete(time);
+        else selectedTimes.add(time);
+        renderTimetable();
+      });
+      els.timeChips.appendChild(chip);
+    }
+
+    els.timetableHint.textContent = selectedTimes.size
+      ? `${selectedTimes.size} sefer taranacak: ${Array.from(selectedTimes).sort().join(", ")}`
+      : "Hiçbiri seçilmezse tüm seferler taranır.";
+    els.timetableHint.classList.toggle("on", selectedTimes.size > 0);
+  }
+
+  /* ====================================================================== */
   /* Form <-> storage                                                       */
   /* ====================================================================== */
 
   function readForm() {
+    const hasTt = !!currentTimetable();
+    const times = hasTt ? Array.from(selectedTimes).sort() : [];
     return {
       fromName: els.fromName.value.trim(),
       fromId: Number(els.fromId.value),
       toName: els.toName.value.trim(),
       toId: Number(els.toId.value),
       date: els.date.value,
-      timeFrom: els.timeFrom.value || "00:00",
-      timeTo: els.timeTo.value || "23:59",
+      // Tarife modunda seçim yoksa saat filtresi uygulanmaz.
+      timeFrom: hasTt ? "00:00" : els.timeFrom.value || "00:00",
+      timeTo: hasTt ? "23:59" : els.timeTo.value || "23:59",
+      times,
       passengerCount: Number(els.passengerCount.value) || 1,
       gender: els.gender.value,
       cabinClass: els.cabinClass.value,
@@ -112,9 +210,18 @@
     if (s.date) els.date.value = s.date;
     if (s.timeFrom) els.timeFrom.value = s.timeFrom;
     if (s.timeTo) els.timeTo.value = s.timeTo;
+    if (Array.isArray(s.times)) selectedTimes = new Set(s.times);
     if (s.passengerCount) els.passengerCount.value = s.passengerCount;
     if (s.gender) els.gender.value = s.gender;
-    if (s.cabinClass) els.cabinClass.value = s.cabinClass;
+    if (s.cabinClass) {
+      // Eski sürümlerden kalan değerler ("Ekonomi") yeni listeyle eşleştirilir.
+      const options = Array.from(els.cabinClass.options).map((o) => o.value);
+      const exact = options.find((v) => v === s.cabinClass);
+      const loose = options.find(
+        (v) => v.toLocaleLowerCase("tr-TR") === String(s.cabinClass).toLocaleLowerCase("tr-TR")
+      );
+      els.cabinClass.value = exact || loose || "AUTO";
+    }
     if (s.intervalSec) els.intervalSec.value = s.intervalSec;
     if (s.preferredWagon) els.preferredWagon.value = s.preferredWagon;
     if (typeof s.autoSelect === "boolean") els.autoSelect.checked = s.autoSelect;
@@ -152,7 +259,9 @@
     if (s.fromId === s.toId) return "Kalkış ve varış istasyonu aynı olamaz.";
     if (!s.date) return "Tarih seçin.";
     if (s.date < todayISO()) return "Geçmiş bir tarih seçilemez.";
-    if (s.timeFrom >= s.timeTo) return "Saat aralığı hatalı (en erken < en geç olmalı).";
+    if (!(s.times && s.times.length) && s.timeFrom >= s.timeTo) {
+      return "Saat aralığı hatalı (en erken < en geç olmalı).";
+    }
     if (s.intervalSec < CFG.DEFAULTS.minIntervalSec) {
       return `Tarama periyodu en az ${CFG.DEFAULTS.minIntervalSec} saniye olmalı.`;
     }
@@ -217,6 +326,7 @@
     await chrome.storage.local.set({ [KEYS.stations]: stations });
 
     renderStations(stations);
+    renderTimetable();
     showError("");
   }
 
@@ -236,14 +346,20 @@
     const data = await chrome.storage.local.get([KEYS.stations]);
     const list = ((data[KEYS.stations] || {}).list) || [];
     const hit = list.find((x) => x.name === nameInput.value.trim());
-    if (hit) idInput.value = hit.id;
+    if (hit) {
+      idInput.value = hit.id;
+      renderTimetable();
+    }
   }
 
   /* ====================================================================== */
   /* Durum gösterimi                                                        */
   /* ====================================================================== */
 
-  function renderTokens(present, meta) {
+  /** Yakalanan uç nokta bilgisi (null ise tahmini adres kullanılacak). */
+  let endpointInfo = null;
+
+  function renderTokens(present, meta, templates) {
     const set = (el, on) => {
       el.classList.toggle("on", !!on);
       el.classList.toggle("off", !on);
@@ -252,17 +368,34 @@
     set(els.chipXsrf, present["x-tms-xsrf-token"]);
     set(els.chipCaptcha, present["captcha-session"]);
 
+    if (templates !== undefined) endpointInfo = (templates && templates.availability) || null;
+    set(els.chipEndpoint, !!endpointInfo);
+
     const missing = [];
     if (!present.authorization) missing.push("Authorization");
     if (!present["x-tms-xsrf-token"]) missing.push("X-Tms-Xsrf-Token");
 
     if (missing.length) {
       els.tokenHint.textContent = `Eksik: ${missing.join(", ")} — TCDD sayfasında bir kez manuel arama yapın.`;
-    } else {
-      els.tokenHint.textContent = `Token'lar hazır. Son yakalama: ${fmtTime(meta && meta.capturedAt)}${
-        present["captcha-session"] ? "" : " (Captcha-Session henüz görülmedi)"
-      }`;
+      return;
     }
+
+    if (!endpointInfo) {
+      // Uç nokta öğrenilmeden tahmini adres denenir; bu çoğu zaman
+      // "Failed to fetch" (HTTP 0) ile sonuçlanır.
+      els.tokenHint.textContent =
+        "Token'lar hazır, ancak sayfanın arama isteği henüz yakalanmadı. " +
+        "Sayfada bir kez MANUEL ARAMA yapın; aksi halde tahmini adres denenir ve ağ hatası alınabilir.";
+      return;
+    }
+
+    let path = endpointInfo.url;
+    try {
+      path = new URL(endpointInfo.url).pathname;
+    } catch (e) {
+      /* yoksay */
+    }
+    els.tokenHint.textContent = `Hazır. Uç nokta: ${path} · Son token: ${fmtTime(meta && meta.capturedAt)}`;
   }
 
   function renderState(state) {
@@ -354,6 +487,17 @@
   });
 
   els.cabinClass.addEventListener("change", syncWheelchairUi);
+  els.fromId.addEventListener("change", renderTimetable);
+  els.toId.addEventListener("change", renderTimetable);
+  els.btnTimesAll.addEventListener("click", () => {
+    const tt = currentTimetable();
+    if (tt) selectedTimes = new Set(tt.times);
+    renderTimetable();
+  });
+  els.btnTimesNone.addEventListener("click", () => {
+    selectedTimes.clear();
+    renderTimetable();
+  });
   els.includeWheelchair.addEventListener("change", syncWheelchairUi);
   els.fromName.addEventListener("change", () => autofillId(els.fromName, els.fromId));
   els.toName.addEventListener("change", () => autofillId(els.toName, els.toId));
@@ -364,7 +508,12 @@
     if (msg.type === MSG.LOG && msg.line) appendLogLine(msg.line);
     if (msg.type === MSG.STATE_CHANGED) {
       if (msg.state) renderState(msg.state);
-      if (msg.headersPresent) renderTokens(msg.headersPresent, msg.headersMeta);
+      if (msg.headersPresent) renderTokens(msg.headersPresent, msg.headersMeta, msg.templates);
+      else if (msg.templates) {
+        endpointInfo = msg.templates.availability || null;
+        els.chipEndpoint.classList.toggle("on", !!endpointInfo);
+        els.chipEndpoint.classList.toggle("off", !endpointInfo);
+      }
     }
   });
 
@@ -376,7 +525,7 @@
     const res = await send(MSG.GET_STATUS);
     if (!res || !res.ok) return;
     renderState(res.state || {});
-    renderTokens(res.headersPresent || {}, res.headersMeta || {});
+    renderTokens(res.headersPresent || {}, res.headersMeta || {}, res.templates || {});
     renderLog(res.log);
     if (!res.tabOpen) {
       els.tokenHint.textContent = "TCDD sekmesi açık değil. Tarama için sekmenin açık kalması gerekir.";
@@ -384,10 +533,13 @@
   }
 
   (async function init() {
-    const data = await chrome.storage.local.get([KEYS.settings, KEYS.stations]);
+    const data = await chrome.storage.local.get([KEYS.settings, KEYS.stations, KEYS.timetables]);
+    learnedTimetables = data[KEYS.timetables] || {};
     els.date.min = todayISO();
     els.date.value = todayISO();
+    renderCabinClasses();
     writeForm(data[KEYS.settings]);
+    renderTimetable();
     syncWheelchairUi();
     renderStations(data[KEYS.stations]);
     await refresh();

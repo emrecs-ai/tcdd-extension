@@ -173,6 +173,16 @@ async function storeHeaders(picked, apiBase, source) {
   }
 }
 
+/** Popup'a gönderilen şablon (uç nokta) özeti. */
+function templateInfo(templates) {
+  const out = {};
+  for (const kind of ["availability", "seatMap"]) {
+    const t = (templates || {})[kind];
+    out[kind] = t && t.url ? { url: t.url, at: t.at } : null;
+  }
+  return out;
+}
+
 function presentMap(headers) {
   return {
     authorization: !!headers["authorization"],
@@ -419,12 +429,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
 
         case MSG.GET_STATUS: {
-          const [state, headers, meta, logLines, settings] = await Promise.all([
+          const [state, headers, meta, logLines, settings, templates] = await Promise.all([
             getState(),
             getStore(KEYS.headers, {}),
             getStore(KEYS.headersMeta, {}),
             getStore(KEYS.log, []),
-            getStore(KEYS.settings, null)
+            getStore(KEYS.settings, null),
+            getStore(KEYS.templates, {})
           ]);
           const tab = await findTcddTab();
           sendResponse({
@@ -433,6 +444,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             settings,
             headersPresent: presentMap(headers),
             headersMeta: meta,
+            templates: templateInfo(templates),
             log: logLines,
             tabOpen: !!tab
           });
@@ -463,8 +475,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const templates = await getStore(KEYS.templates, {});
           templates[msg.kind] = { url: msg.url, body: msg.body, at: Date.now() };
           await setStore(KEYS.templates, templates);
-          await appendLog("info", `İstek şablonu güncellendi: ${msg.kind}`);
+          await appendLog("info", `İstek şablonu güncellendi: ${msg.kind} (${msg.url})`);
+          broadcast(MSG.STATE_CHANGED, { templates: templateInfo(templates) });
           sendResponse({ ok: true });
+          break;
+        }
+
+        case MSG.CAPTURED_TIMETABLE: {
+          // Taramada dönen gerçek kalkış saatleri güzergâh bazında biriktirilir.
+          const all = await getStore(KEYS.timetables, {});
+          const prev = all[msg.routeKey] || { times: [] };
+          const merged = Array.from(new Set(prev.times.concat(msg.times || []))).sort();
+          all[msg.routeKey] = { label: msg.label || prev.label || "", times: merged.slice(0, 40), at: Date.now() };
+          await setStore(KEYS.timetables, all);
+          sendResponse({ ok: true, count: merged.length });
           break;
         }
 

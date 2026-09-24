@@ -45,16 +45,52 @@ popup  ──START──▶  background ──CONTENT_START──▶  content.js
 
 1. `https://ebilet.tcddtasimacilik.gov.tr` adresini açın.
 2. **Sayfada bir kez manuel arama yapın** (gerekirse Captcha'yı çözün).
-   Bu adım şart: token'lar ve Captcha oturumu ancak gerçek bir istekten yakalanabilir.
-   Popup'taki `JWT` / `XSRF` / `Captcha` rozetleri yeşile döndüğünde hazırsınız.
+   Bu adım şart: token'lar, Captcha oturumu **ve API adresi** ancak gerçek bir istekten
+   yakalanabilir. Popup'taki `JWT` / `XSRF` / `Captcha` / `Uç nokta` rozetlerinin dördü de
+   yeşile döndüğünde hazırsınız.
 3. Eklenti popup'ını açın, **"↺ Son manuel aramadan doldur"** butonuna basın — kalkış/varış
    istasyonları ve ID'leri yaptığınız aramadan otomatik doldurulur.
-4. Tarih, saat aralığı, yolcu sayısı, cinsiyet ve vagon tipini seçip **Taramayı Başlat**'a basın.
+4. Tarih, sefer saatleri, yolcu sayısı, cinsiyet ve vagon tipini seçip **Taramayı Başlat**'a basın.
    Tekerlekli sandalye koltukları varsayılan olarak yok sayılır (bkz. aşağıdaki bölüm).
 5. TCDD sekmesini **açık bırakın**. Tarama o sekmede çalışır.
 
 Koltuk bulunduğunda: bildirim gelir → tarama durur → DOM otomasyonu koltuğu seçer →
 "Bilet Seçildi, Ödeme Yapın" bildirimi gelir.
+
+### Uç nokta (API adresi) neden yakalanmalı?
+
+Eklenti, taramada **sayfanın kendi kullandığı istek adresini birebir** kullanır; yapılandırmadaki
+yollar yalnızca yedektir. Tahmini bir yola istek atmak şu zincire yol açar:
+
+```
+tahmini yol  ->  sunucu 404 (CORS başlığı olmadan)  ->  tarayıcı isteği düşürür
+             ->  eklentide "HTTP 0 / Failed to fetch"
+```
+
+Aynı sonuç, gövde şeması tutmadığında da görülür: çoğu sunucu 4xx yanıtlarına CORS başlığı
+eklemez, tarayıcı da bunu ağ hatası olarak raporlar. Bu yüzden eklenti, sizin manuel aramanızdan
+hem **URL'yi** hem de **istek gövdesini** şablon olarak alır ve yalnızca tarih/istasyon/saat
+alanlarını değiştirir.
+
+`Uç nokta` rozeti kırmızıysa tarama tahmini adresi dener ve büyük ihtimalle ağ hatası alırsınız —
+sayfada bir arama yapmanız yeterlidir. Ağ hatasında eklenti ayrıca **bir kez sadeleştirilmiş
+başlıklarla** (yalnızca `Authorization`, `X-Tms-Xsrf-Token`, `Captcha-Session`) tekrar dener;
+fazladan bir başlık CORS ön kontrolünde reddediliyorsa bu denemede başarılı olur ve log'a yazar.
+
+### Sefer saatleri
+
+YHT kalkış saatleri sabit olduğu için, tanımlı tarifesi olan güzergâhlarda popup "en erken / en geç"
+yerine **sefer saati listesi** gösterir; taranacak seferleri tek tek işaretlersiniz. Hiçbiri
+seçilmezse tüm seferler taranır.
+
+- Sabit tarifeler: `src/config.js` → `KNOWN_TIMETABLES`, anahtar `"<kalkışID>-<varışID>"`.
+  Hazır gelen: `1325-98` (İstanbul Söğütlüçeşme → Ankara Gar, 15 sefer).
+- **Öğrenme:** her başarılı taramada dönen gerçek kalkış saatleri güzergâh bazında kaydedilir;
+  tanımlı tarifesi olmayan güzergâhlarda (ör. ters yön) liste bir taramadan sonra kendiliğinden
+  oluşur. Tarifesi hiç bilinmeyen güzergâhta arayüz saat aralığına düşer.
+
+Vagon tipi listesi de `src/config.js` → `CABIN_CLASSES` üzerinden üretilir
+(Ekonomi, Business, Loca, Yataklı, Örtülü Kuşet, Tekerlekli Sandalye).
 
 ### Tekerlekli sandalye (engelli) koltukları
 
@@ -128,6 +164,8 @@ Tüm beklemeler `MutationObserver` + periyodik yoklama ile yapılır (`src/dom-u
 __TCDD_DEBUG__.extractTrains(yanitJson);            // [{ time, emptyCount, cabins: [{label,id,count,wheelchair}] }]
 __TCDD_DEBUG__.extractEmptySeats(koltukHaritasiJson, {});  // { seats, total, wheelchairSkipped }
 __TCDD_DEBUG__.isWheelchairLabel("Tekerlekli Sandalye");   // true
+await __TCDD_DEBUG__.resolveEndpoint("availability", "/tms/train/train-availability");
+__TCDD_DEBUG__.matchesTime("11:10", { times: ["11:10"] });  // true
 __TCDD_DEBUG__.state;
 ```
 
@@ -136,7 +174,7 @@ __TCDD_DEBUG__.state;
 Tarayıcı olmadan çalışan birim testleri:
 
 ```bash
-node tests/parsers.test.js    # yanıt ayrıştırıcıları + şablon yamalama
+node tests/parsers.test.js    # ayrıştırıcılar, şablon yamalama, uç nokta çözümleme, saat eşleşmesi
 node tests/manifest.test.js   # manifest ve dosya referansları
 ```
 
@@ -148,6 +186,7 @@ ayrıştırıcıyı ona göre güncellemek en hızlı yoldur.
 | Belirti | Sebep / Çözüm |
 |---|---|
 | "Güvenlik bilgileri henüz yakalanmadı" | Sayfada henüz manuel arama yapmadınız. Bir arama yapın. |
+| **"Ağ hatası … Failed to fetch" (HTTP 0)** | İstek hiç yanıt alamadı: uç nokta öğrenilmemiş (tahmini yol 404 veriyor), gövde şeması tutmuyor ya da bir başlık CORS ön kontrolünde reddediliyor. Çözüm: TCDD sayfasında bir kez **manuel arama** yapın — `Uç nokta` rozeti yeşile döner, eklenti gerçek adresi ve gövdeyi kullanır. |
 | 403 / 401 döngüsü | Captcha süresi doluyor. Sayfayı yenileyip manuel arama yapın; tarama otomatik devam eder. |
 | "Yanıt ayrıştırılamadı veya sefer bulunamadı" | API şeması değişmiş olabilir. Debug modunu açıp ham yanıta bakın, `RE` desenlerini güncelleyin. |
 | Koltuk bulunuyor ama DOM adımları takılıyor | `src/config.js` → `SELECTORS` içindeki aday seçicileri güncelleyin. |

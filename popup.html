@@ -24,6 +24,7 @@
         <span class="chip" id="chipAuth" title="Authorization (JWT)">JWT</span>
         <span class="chip" id="chipXsrf" title="X-Tms-Xsrf-Token">XSRF</span>
         <span class="chip" id="chipCaptcha" title="Captcha-Session">Captcha</span>
+        <span class="chip" id="chipEndpoint" title="Sayfanın gerçek arama isteği yakalandı mı?">Uç nokta</span>
       </div>
       <p class="hint" id="tokenHint">
         Token bekleniyor — TCDD sayfasında bir kez manuel arama yapın.
@@ -66,14 +67,29 @@
           <span>Tarih</span>
           <input type="date" id="date" required />
         </label>
-        <label class="field field-xs">
+        <label class="field field-xs" id="timeFromField">
           <span>En erken</span>
           <input type="time" id="timeFrom" value="00:00" required />
         </label>
-        <label class="field field-xs">
+        <label class="field field-xs" id="timeToField">
           <span>En geç</span>
           <input type="time" id="timeTo" value="23:59" required />
         </label>
+      </div>
+
+      <!-- Bilinen tarifeli güzergâhlarda sefer saatleri doğrudan seçilir -->
+      <div class="timetable" id="timetableWrap" hidden>
+        <div class="timetable-head">
+          <span id="timetableLabel">Sefer saatleri</span>
+          <span class="timetable-actions">
+            <button class="btn btn-ghost btn-xs" id="btnTimesAll" type="button">Tümü</button>
+            <button class="btn btn-ghost btn-xs" id="btnTimesNone" type="button">Temizle</button>
+          </span>
+        </div>
+        <div class="chips" id="timeChips"></div>
+        <p class="hint hint-inline" id="timetableHint">
+          Hiçbiri seçilmezse tüm seferler taranır.
+        </p>
       </div>
 
       <div class="row">
@@ -90,14 +106,8 @@
         </label>
         <label class="field">
           <span>Vagon tipi</span>
-          <select id="cabinClass">
-            <option value="AUTO">Otomatik</option>
-            <option value="Ekonomi">Ekonomi</option>
-            <option value="Business">Business</option>
-            <option value="Yataklı">Yataklı</option>
-            <option value="Örtülü Kuşet">Örtülü Kuşet</option>
-            <option value="Tekerlekli Sandalye">Tekerlekli Sandalye</option>
-          </select>
+          <!-- Seçenekler src/config.js -> CABIN_CLASSES üzerinden doldurulur -->
+          <select id="cabinClass"></select>
         </label>
       </div>
 
@@ -126,7 +136,7 @@
         <input type="checkbox" id="includeWheelchair" />
         <span>Tekerlekli sandalye (engelli) koltuklarını dahil et</span>
       </label>
-      <p class="hint hint-inline" id="wheelchairHint">
+      <p class="hint hint-inline hint-indent" id="wheelchairHint">
         Varsayılan olarak bu koltuklar yok sayılır; yalnızca onlar boşken alarm verilmez ve
         otomatik seçim başlatılmaz.
       </p>

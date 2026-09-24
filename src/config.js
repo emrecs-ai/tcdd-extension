@@ -25,12 +25,30 @@
      */
     API_BASE_FALLBACK: "https://web-api-prod-ytp.tcddtasimacilik.gov.tr",
 
-    /** Kullanılan uç noktalar (path). */
+    /**
+     * Uç noktalar — YALNIZCA YEDEK (fallback) değerlerdir.
+     *
+     * Eklenti, kullanıcının sayfada yaptığı gerçek aramanın URL'sini yakalar ve
+     * taramada BİREBİR o adresi kullanır. Tahmini bir yol kullanmak, sunucunun
+     * 404 + CORS başlıksız yanıt vermesine ve isteğin "Failed to fetch"
+     * (HTTP 0) ile düşmesine yol açar.
+     */
     ENDPOINTS: {
       stationPairs: "/tms/station/station-pairs-INTERNET",
       availability: "/tms/train/train-availability",
       seatMap: "/tms/seat-maps/load-by-train-id"
     },
+
+    /**
+     * Yakalanan isteğin hangi amaca hizmet ettiğini URL'den tanımak için
+     * kullanılan desenler. Yol adı değişse bile şablon yakalanabilsin diye
+     * sabit yol yerine desen eşleşmesi kullanılır. Sıra önemlidir.
+     */
+    ENDPOINT_PATTERNS: [
+      { kind: "seatMap", re: /(seat-?maps?|load-by-train-id|koltuk)/i },
+      { kind: "availability", re: /(train-availability|availabilit|trip-search|sefer|search)/i },
+      { kind: "stationPairs", re: /(station-pairs|stations|istasyon)/i }
+    ],
 
     /**
      * Yakalanan (capture edilen) başlıklar. Küçük harf ile tutulur.
@@ -56,6 +74,7 @@
       settings: "tcdd_settings",      // popup form verileri
       state: "tcdd_state",            // { running, paused, reason, startedAt, ... }
       stations: "tcdd_stations",      // { fetchedAt, list: [{id, name}] }
+      timetables: "tcdd_timetables",  // { "<fromId>-<toId>": { times: [...], at } } - taramadan öğrenilir
       log: "tcdd_log"                 // son N log satırı
     },
 
@@ -78,6 +97,7 @@
       AUTOMATION_FAILED: "AUTOMATION_FAILED",
       CAPTURED_HEADERS: "CAPTURED_HEADERS",
       CAPTURED_TEMPLATE: "CAPTURED_TEMPLATE",
+      CAPTURED_TIMETABLE: "CAPTURED_TIMETABLE",
       LOG: "LOG",
       // background -> popup (broadcast)
       STATE_CHANGED: "STATE_CHANGED"
@@ -121,6 +141,40 @@
       flagKeys: /(wheelchair|engelli|ozurlu|özürlü|handicap|tekerlekli|accessib)/i,
       /** popup'taki vagon tipi seçeneğinin etiketi. */
       optionLabel: "Tekerlekli Sandalye"
+    },
+
+    /**
+     * Vagon tipleri. TCDD e-bilet arayüzündeki karşılıklarıyla aynı yazılır;
+     * popup'taki liste buradan üretilir.
+     */
+    CABIN_CLASSES: [
+      { value: "AUTO", label: "Otomatik (hepsi)" },
+      { value: "EKONOMİ", label: "Ekonomi" },
+      { value: "BUSINESS", label: "Business" },
+      { value: "LOCA", label: "Loca" },
+      { value: "YATAKLI", label: "Yataklı" },
+      { value: "ÖRTÜLÜ KUŞET", label: "Örtülü Kuşet" },
+      { value: "TEKERLEKLİ SANDALYE", label: "Tekerlekli Sandalye" }
+    ],
+
+    /**
+     * BİLİNEN TARİFELER
+     * -------------------------------------------------------------------------
+     * YHT kalkış saatleri sabit olduğu için, kullanıcı saat aralığı vermek
+     * yerine doğrudan sefer saati seçebilir. Anahtar: "<kalkışID>-<varışID>".
+     *
+     * Tanımlı tarifesi olmayan güzergâhlarda arayüz otomatik olarak
+     * "en erken / en geç" saat aralığına düşer. Yeni güzergâh eklemek için
+     * buraya istasyon ID'leriyle bir satır eklemek yeterlidir.
+     */
+    KNOWN_TIMETABLES: {
+      "1325-98": {
+        label: "İSTANBUL(SÖĞÜTLÜÇEŞME) → ANKARA GAR",
+        times: [
+          "05:30", "07:20", "08:23", "09:00", "11:10", "11:50", "12:20", "13:05",
+          "14:35", "15:40", "16:15", "18:20", "18:55", "19:40", "20:24"
+        ]
+      }
     },
 
     /** Varsayılan tarama parametreleri. */

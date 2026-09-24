@@ -112,14 +112,16 @@
     }
     send(MSG.CAPTURED_HEADERS, { headers: msg.headers, apiBase });
 
-    // Gerçek istek gövdelerini "şablon" olarak saklıyoruz: API alan adları
-    // değişse bile kullanıcının yaptığı aramayı taklit edebilmek için.
+    // Gerçek istek URL'sini ve gövdesini "şablon" olarak saklıyoruz.
+    // URL'yi saklamak kritik: taramada tahmini yol yerine sayfanın kullandığı
+    // adresin birebir aynısı kullanılır (yanlış yol -> 404 -> "Failed to fetch").
     if (msg.body && typeof msg.body === "object") {
       const url = String(msg.url);
-      let kind = null;
-      if (url.includes(CFG.ENDPOINTS.availability)) kind = "availability";
-      else if (url.includes(CFG.ENDPOINTS.seatMap)) kind = "seatMap";
-      if (kind) send(MSG.CAPTURED_TEMPLATE, { kind, url, body: msg.body });
+      const match = CFG.ENDPOINT_PATTERNS.find((p) => p.re.test(url));
+      if (match && match.kind !== "stationPairs") {
+        U.log(`İstek şablonu yakalandı [${match.kind}]:`, url);
+        send(MSG.CAPTURED_TEMPLATE, { kind: match.kind, url, body: msg.body });
+      }
     }
   }
 
@@ -141,9 +143,9 @@
    * Sayfa bağlamında API isteği atar.
    * @returns {Promise<{ok:boolean,status:number,json:any,error?:string}>}
    */
-  async function apiRequest(url, body, method) {
+  async function apiRequest(url, body, method, opts) {
     await waitBridge();
-    const headers = await buildHeaders();
+    const headers = await buildHeaders(opts && opts.minimalHeaders);
     const id = "req_" + ++bridge.seq;
 
     return new Promise((resolve) => {
@@ -170,21 +172,41 @@
     });
   }
 
-  /** storage'daki en güncel token'lardan istek başlıklarını kurar. */
-  async function buildHeaders() {
+  /**
+   * storage'daki en güncel token'lardan istek başlıklarını kurar.
+   *
+   * @param {boolean} minimal Yalnızca zorunlu başlıklar gönderilir. Sunucunun
+   *   CORS ön kontrolünde kabul etmediği bir başlık isteği düşürüyorsa
+   *   ("Failed to fetch") bu mod ile bir kez daha denenir.
+   */
+  /** Tüm isteklerde gönderilen zorunlu güvenlik başlıkları. */
+  const CORE_HEADER_MAP = {
+    authorization: "Authorization",
+    "x-tms-xsrf-token": "X-Tms-Xsrf-Token",
+    "captcha-session": "Captcha-Session"
+  };
+
+  /** Sayfanın ek olarak gönderdiği, zorunlu olmayan başlıklar. */
+  const EXTRA_HEADER_MAP = {
+    "unit-id": "Unit-Id",
+    "channel-code": "Channel-Code",
+    "device-id": "Device-Id",
+    "application-name": "Application-Name"
+  };
+
+  /**
+   * storage'daki en güncel token'lardan istek başlıklarını kurar.
+   *
+   * @param {boolean} minimal Yalnızca zorunlu başlıklar gönderilir. Sunucunun
+   *   CORS ön kontrolünde kabul etmediği fazladan bir başlık isteği düşürüyorsa
+   *   ("Failed to fetch" / HTTP 0) bu mod ile bir kez daha denenir.
+   */
+  async function buildHeaders(minimal) {
     const data = await chrome.storage.local.get([KEYS.headers]);
     const captured = data[KEYS.headers] || {};
     const headers = { "Content-Type": "application/json", Accept: "application/json, text/plain, */*" };
 
-    const map = {
-      authorization: "Authorization",
-      "x-tms-xsrf-token": "X-Tms-Xsrf-Token",
-      "captcha-session": "Captcha-Session",
-      "unit-id": "Unit-Id",
-      "channel-code": "Channel-Code",
-      "device-id": "Device-Id",
-      "application-name": "Application-Name"
-    };
+    const map = minimal ? CORE_HEADER_MAP : Object.assign({}, CORE_HEADER_MAP, EXTRA_HEADER_MAP);
     for (const key of Object.keys(map)) {
       if (captured[key]) headers[map[key]] = captured[key];
     }
@@ -199,6 +221,24 @@
 
   async function endpointUrl(path) {
     return (await getApiBase()).replace(/\/+$/, "") + path;
+  }
+
+  /**
+   * Bir işlem için kullanılacak URL'yi çözer.
+   *
+   * Öncelik sırası:
+   *   1. Kullanıcının sayfada yaptığı gerçek isteğin URL'si (yakalanmış şablon)
+   *   2. Yakalanan API tabanı + yapılandırmadaki yedek yol
+   *
+   * 1. seçenek varken 2.'yi kullanmak, yol adı değişmişse sunucudan CORS
+   * başlıksız 404 almaya ve isteğin HTTP 0 ile düşmesine yol açar.
+   */
+  async function resolveEndpoint(kind, fallbackPath) {
+    const tpl = await getTemplate(kind);
+    if (tpl && tpl.url) {
+      return { url: tpl.url, source: "yakalanan" };
+    }
+    return { url: await endpointUrl(fallbackPath), source: "varsayılan" };
   }
 
   /* ====================================================================== */
@@ -682,6 +722,23 @@
     return mins >= from && mins <= to;
   }
 
+  /**
+   * Sefer saati kullanıcının hedefiyle uyuşuyor mu?
+   * Kullanıcı tarifeden belirli saatleri seçtiyse (ör. 11:10, 12:20) yalnızca
+   * o seferler taranır; seçim yoksa "en erken - en geç" aralığına düşülür.
+   */
+  function matchesTime(time, s) {
+    if (Array.isArray(s.times) && s.times.length) {
+      return s.times.includes(time);
+    }
+    return timeInWindow(time, s);
+  }
+
+  /** Log/başlık için hedef saat açıklaması. */
+  function timeCriteriaText(s) {
+    return Array.isArray(s.times) && s.times.length ? s.times.join(", ") : `${s.timeFrom}-${s.timeTo}`;
+  }
+
   async function runScanOnce() {
     if (state.busy || state.stopped) return;
     state.busy = true;
@@ -689,13 +746,23 @@
 
     try {
       state.scanCount++;
-      report("info", `#${state.scanCount} tarama: ${s.fromName} -> ${s.toName} ${s.date} (${s.timeFrom}-${s.timeTo})`, {
+      report("info", `#${state.scanCount} tarama: ${s.fromName} -> ${s.toName} ${s.date} (${timeCriteriaText(s)})`, {
         scanTick: true
       });
 
-      const url = await endpointUrl(CFG.ENDPOINTS.availability);
+      const ep = await resolveEndpoint("availability", CFG.ENDPOINTS.availability);
+      if (state.scanCount === 1) report("info", `Arama uç noktası (${ep.source}): ${ep.url}`);
+
       const body = await buildSearchBody(s);
-      const res = await apiRequest(url, body, "POST");
+      let res = await apiRequest(ep.url, body, "POST");
+
+      // Ağ düzeyinde düştüyse (CORS ön kontrolü / fazladan başlık) bir kez
+      // sadeleştirilmiş başlıklarla dene. Yalnızca serideki ilk hatada.
+      if (res.status === 0 && state.consecutiveErrors === 0) {
+        report("warn", "İstek ağ düzeyinde düştü; başlıklar sadeleştirilip bir kez daha denenecek.");
+        res = await apiRequest(ep.url, body, "POST", { minimalHeaders: true });
+        if (res.ok) report("ok", "Sadeleştirilmiş başlıklarla başarılı. Fazladan bir başlık isteği düşürüyor olabilir.");
+      }
 
       if (res.status === 401 || res.status === 403) {
         await handleAuthFailure(res.status);
@@ -703,10 +770,30 @@
       }
       if (!res.ok) {
         state.consecutiveErrors++;
-        report("warn", `Arama başarısız (HTTP ${res.status}) ${res.error || ""} [${state.consecutiveErrors}/${CFG.DEFAULTS.maxConsecutiveErrors}]`);
+        const attempt = `[${state.consecutiveErrors}/${CFG.DEFAULTS.maxConsecutiveErrors}]`;
+
+        if (res.status === 0) {
+          // Yanıt hiç alınamadı: yol yanlış (404 + CORS başlığı yok), sunucuya
+          // ulaşılamıyor ya da istek CORS ön kontrolünde düştü.
+          report(
+            "error",
+            `Ağ hatası ${attempt}: ${ep.url} adresine ulaşılamadı (${res.error || "Failed to fetch"}). ` +
+              (ep.source === "varsayılan"
+                ? "Uç nokta tahmini kullanılıyor. TCDD sayfasında bir kez MANUEL ARAMA yapın; eklenti gerçek adresi yakalayıp onu kullanacak."
+                : "Sayfa bu adresi kullanıyor olsa da istek düştü; sayfayı yenileyip manuel arama yapın.")
+          );
+        } else {
+          report("warn", `Arama başarısız (HTTP ${res.status}) ${res.error || ""} ${attempt}`);
+        }
+
         if (state.consecutiveErrors >= CFG.DEFAULTS.maxConsecutiveErrors) {
           stopScan("error");
-          await send(MSG.AUTOMATION_FAILED, { error: "Ardışık ağ hataları nedeniyle tarama durduruldu." });
+          await send(MSG.AUTOMATION_FAILED, {
+            error:
+              res.status === 0
+                ? `İstek ağ düzeyinde başarısız oldu (${ep.url}). Uç nokta öğrenilemediği için tarama durduruldu: TCDD sayfasında bir kez manuel arama yapıp tekrar başlatın.`
+                : "Ardışık ağ hataları nedeniyle tarama durduruldu."
+          });
         }
         return;
       }
@@ -720,10 +807,18 @@
         return;
       }
 
-      const candidates = trains.filter((t) => timeInWindow(t.time, s));
+      // Gerçek yanıttaki kalkış saatlerini güzergâhın tarifesi olarak öğren;
+      // popup bunları saat seçim listesinde gösterir (ters yön dahil).
+      send(MSG.CAPTURED_TIMETABLE, {
+        routeKey: `${s.fromId}-${s.toId}`,
+        label: `${s.fromName} → ${s.toName}`,
+        times: trains.map((t) => t.time)
+      });
+
+      const candidates = trains.filter((t) => matchesTime(t.time, s));
       report(
         "info",
-        `${trains.length} sefer döndü, ${candidates.length} tanesi saat aralığında. ` +
+        `${trains.length} sefer döndü, ${candidates.length} tanesi hedef saatlerde. ` +
           candidates.map((t) => `${t.time}:${countForCabin(t, s)}`).join(" ")
       );
 
@@ -756,9 +851,9 @@
       let seats = [];
       let seatMapParsed = null;
       try {
-        const seatUrl = await endpointUrl(CFG.ENDPOINTS.seatMap);
+        const seatEp = await resolveEndpoint("seatMap", CFG.ENDPOINTS.seatMap);
         const seatBody = await buildSeatMapBody(hit, s);
-        const seatRes = await apiRequest(seatUrl, seatBody, "POST");
+        const seatRes = await apiRequest(seatEp.url, seatBody, "POST");
 
         if (seatRes.status === 401 || seatRes.status === 403) {
           await handleAuthFailure(seatRes.status);
@@ -785,7 +880,10 @@
               "."
           );
         } else {
-          report("warn", `Koltuk haritası alınamadı (HTTP ${seatRes.status}); DOM üzerinden devam edilecek.`);
+          report(
+            "warn",
+            `Koltuk haritası alınamadı (HTTP ${seatRes.status}, ${seatEp.source} uç nokta); DOM üzerinden devam edilecek.`
+          );
         }
       } catch (e) {
         report("warn", "Koltuk haritası hatası: " + e.message);
@@ -838,7 +936,20 @@
     state.scanCount = 0;
 
     const intervalSec = Math.max(CFG.DEFAULTS.minIntervalSec, Number(settings.intervalSec) || CFG.DEFAULTS.intervalSec);
-    report("ok", `Tarama başladı. Periyot: ${intervalSec} sn.`);
+    report(
+      "ok",
+      `Tarama başladı. Periyot: ${intervalSec} sn. Hedef saatler: ${timeCriteriaText(settings)}.`
+    );
+
+    getTemplate("availability").then((tpl) => {
+      if (!tpl) {
+        report(
+          "warn",
+          "Sayfanın gerçek arama isteği henüz yakalanmadı; tahmini uç nokta denenecek. " +
+            "Hata alırsanız TCDD sayfasında bir kez manuel arama yapın."
+        );
+      }
+    });
 
     injectPageScript();
     // İlk tarama hemen, sonrakiler periyodik.
@@ -1123,6 +1234,8 @@
     findSeatElement,
     buildSearchBody,
     buildSeatMapBody,
+    resolveEndpoint,
+    matchesTime,
     apiRequest,
     runScanOnce,
     stopScan
