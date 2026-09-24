@@ -658,13 +658,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         case MSG.AUTOMATION_FAILED: {
-          await setState({ running: false, reason: "automation" });
+          // Tarama hatası ile koltuk seçimi hatası farklı şeylerdir; ikisine de
+          // aynı bildirimi göstermek "koltuk bulundu" gibi yanlış bilgi veriyordu.
+          const isScanStage = msg.stage === "scan";
+          await setState({ running: false, reason: isScanStage ? "error" : "automation" });
           await ensureWatchdog(false);
-          await appendLog("error", "Otomasyon hatası: " + msg.error);
+          await appendLog("error", (isScanStage ? "Tarama durduruldu: " : "Otomasyon hatası: ") + msg.error);
+
           notify(
             NOTIF.ERROR,
-            "Otomatik seçim tamamlanamadı",
-            `${msg.error}\nKoltuk bulundu ancak seçim adımı tamamlanamadı, lütfen sayfadan manuel devam edin.`,
+            isScanStage ? "Tarama durduruldu" : "Otomatik seçim tamamlanamadı",
+            isScanStage
+              ? msg.error
+              : `${msg.error}\nKoltuk bulundu ancak seçim adımı tamamlanamadı, lütfen sayfadan manuel devam edin.`,
             { requireInteraction: true }
           );
           sendResponse({ ok: true });

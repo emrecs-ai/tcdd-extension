@@ -948,10 +948,12 @@
         if (state.consecutiveErrors >= CFG.DEFAULTS.maxConsecutiveErrors) {
           stopScan("error");
           await send(MSG.AUTOMATION_FAILED, {
+            stage: "scan",
             error:
               res.status === 0
                 ? `İstek ağ düzeyinde başarısız oldu (${ep.url}). Uç nokta öğrenilemediği için tarama durduruldu: TCDD sayfasında bir kez manuel arama yapıp tekrar başlatın.`
-                : "Ardışık ağ hataları nedeniyle tarama durduruldu."
+                : `Ardışık ${CFG.DEFAULTS.maxConsecutiveErrors} hata (son: HTTP ${res.status}). ` +
+                  "TCDD sayfasında yeni bir arama yapın (istek şablonu tazelensin), sonra taramayı tekrar başlatın."
           });
         }
         return;
@@ -1490,7 +1492,7 @@
     } catch (e) {
       U.error("Otomasyon hatası:", e);
       report("error", "Otomasyon hatası: " + (e.message || e));
-      await send(MSG.AUTOMATION_FAILED, { error: String(e.message || e) });
+      await send(MSG.AUTOMATION_FAILED, { stage: "automation", error: String(e.message || e) });
     } finally {
       state.automationRunning = false;
     }
