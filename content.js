@@ -40,7 +40,9 @@
     automationRunning: false,
     /** API saatleri seçimlerden sabit bir fark gösteriyorsa hizalanmış liste. */
     alignedTimes: null,
-    timeOffsetMin: 0
+    timeOffsetMin: 0,
+    /** Yakalanan şablon hatalı görünüyorsa (4xx) varsayılana düşülür. */
+    templateSuspect: false
   };
 
   /* ====================================================================== */
@@ -241,7 +243,7 @@
    * başlıksız 404 almaya ve isteğin HTTP 0 ile düşmesine yol açar.
    */
   async function resolveEndpoint(kind, fallbackPath) {
-    const tpl = await getTemplate(kind);
+    const tpl = state.templateSuspect ? null : await getTemplate(kind);
     if (tpl && tpl.url) {
       return { url: tpl.url, source: "yakalanan" };
     }
@@ -745,8 +747,8 @@
   }
 
   /** Sefer arama gövdesi. */
-  async function buildSearchBody(s) {
-    const tpl = await getTemplate("availability");
+  async function buildSearchBody(s, opts) {
+    const tpl = opts && opts.ignoreTemplate ? null : state.templateSuspect ? null : await getTemplate("availability");
     if (tpl) {
       U.log("Arama şablonu (kullanıcının gerçek aramasından) kullanılıyor.");
       return patchTemplate(tpl.body, [
@@ -901,6 +903,30 @@
         await handleAuthFailure(res.status);
         return;
       }
+
+      /**
+       * 4xx: yakalanan şablon yanlış uç noktaya ait olabilir (ör. sayfanın
+       * "availability-calendar" isteği sefer aramasıyla karıştırılmışsa).
+       * Varsayılan uç nokta ve gövde ile bir kez denenir; tutarsa şablon
+       * bu tarama boyunca yok sayılır.
+       */
+      if ([400, 404, 405, 422].includes(res.status) && ep.source === "yakalanan" && !state.templateSuspect) {
+        report("warn", `Yakalanan şablonla HTTP ${res.status} (${ep.url}); varsayılan uç nokta ile yeniden denenecek.`);
+        state.templateSuspect = true;
+
+        const fallbackUrl = await endpointUrl(CFG.ENDPOINTS.availability);
+        const fallbackBody = await buildSearchBody(s, { ignoreTemplate: true });
+        res = await apiRequest(fallbackUrl, fallbackBody, "POST");
+
+        report(
+          res.ok ? "ok" : "warn",
+          res.ok
+            ? `Varsayılan uç nokta çalıştı (${fallbackUrl}); yakalanan şablon yok sayılıyor. ` +
+              "Sayfada yeni bir arama yaparsanız şablon tazelenir."
+            : `Varsayılan uç nokta da başarısız (HTTP ${res.status}).`
+        );
+      }
+
       if (!res.ok) {
         state.consecutiveErrors++;
         const attempt = `[${state.consecutiveErrors}/${CFG.DEFAULTS.maxConsecutiveErrors}]`;
@@ -916,7 +942,7 @@
                 : "Sayfa bu adresi kullanıyor olsa da istek düştü; sayfayı yenileyip manuel arama yapın.")
           );
         } else {
-          report("warn", `Arama başarısız (HTTP ${res.status}) ${res.error || ""} ${attempt}`);
+          report("warn", `Arama başarısız (HTTP ${res.status}) ${res.error || ""} ${attempt} → ${ep.url}`);
         }
 
         if (state.consecutiveErrors >= CFG.DEFAULTS.maxConsecutiveErrors) {
@@ -1113,6 +1139,7 @@
     state.scanCount = 0;
     state.alignedTimes = null;
     state.timeOffsetMin = 0;
+    state.templateSuspect = false;
 
     const intervalSec = Math.max(CFG.DEFAULTS.minIntervalSec, Number(settings.intervalSec) || CFG.DEFAULTS.intervalSec);
     report(
