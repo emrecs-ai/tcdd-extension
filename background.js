@@ -209,6 +209,70 @@ async function maybeResumeAfterCaptcha(headers) {
   if (settings) await startContentScan(settings, { resumed: true });
 }
 
+/**
+ * İstek şablonunu (gerçek URL + gövde) saklar.
+ * İki kaynaktan gelebilir: sayfa bağlamındaki fetch/XHR hook'u ya da
+ * aşağıdaki webRequest dinleyicisi.
+ */
+async function storeTemplate(kind, url, body, source) {
+  if (!kind || !url || !body) return false;
+  const templates = await getStore(KEYS.templates, {});
+  const prev = templates[kind];
+  templates[kind] = { url, body, at: Date.now(), source: source || "page" };
+  await setStore(KEYS.templates, templates);
+
+  if (!prev || prev.url !== url) {
+    await appendLog("ok", `İstek şablonu yakalandı [${kind}] (${source || "page"}): ${url}`);
+  }
+  broadcast(MSG.STATE_CHANGED, { templates: templateInfo(templates) });
+  return true;
+}
+
+/**
+ * Şablonu doğrudan ağ trafiğinden yakalar.
+ *
+ * Bu yol content script'e BAĞIMLI DEĞİLDİR. Eklenti yenilendiğinde açık
+ * sekmelerdeki content script ölür ve otomatik olarak yeniden enjekte edilmez;
+ * o durumda sayfa bağlamındaki hook çalışmadığı için şablon yakalanamıyordu.
+ * webRequest arka planda yaşadığından kullanıcının manuel araması her hâlükârda
+ * görülür.
+ */
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    try {
+      if (details.method !== "POST") return;
+      if (!/\/tms\//i.test(details.url)) return;
+
+      const match = CFG.ENDPOINT_PATTERNS.find((p) => p.re.test(details.url));
+      if (!match || match.kind === "stationPairs") return;
+
+      const raw = details.requestBody && details.requestBody.raw;
+      if (!raw || !raw.length) return;
+
+      // Gövde birden fazla parçaya bölünmüş olabilir.
+      const decoder = new TextDecoder("utf-8");
+      let text = "";
+      for (const part of raw) {
+        if (part && part.bytes) text += decoder.decode(part.bytes, { stream: true });
+      }
+      text += decoder.decode();
+      if (!text || text.length > 200000) return;
+
+      let body = null;
+      try {
+        body = JSON.parse(text);
+      } catch (e) {
+        return; // JSON olmayan gövdeler şablon olarak kullanılamaz
+      }
+      storeTemplate(match.kind, details.url, body, "webRequest");
+    } catch (e) {
+      warn("Gövde yakalama hatası:", e);
+    }
+  },
+  { urls: ["https://*.tcddtasimacilik.gov.tr/*"] },
+  ["requestBody"]
+);
+
 /* ========================================================================== */
 /* 2) Sekme yönetimi ve content script enjeksiyonu                            */
 /* ========================================================================== */
@@ -247,6 +311,42 @@ function waitForTabComplete(tabId, timeout) {
   });
 }
 
+/**
+ * Sayfa bağlamı (MAIN world) köprüsünü enjekte eder.
+ * <script src> ile enjeksiyon sayfanın CSP'sine takılabildiği için
+ * öncelikli yol chrome.scripting + world:"MAIN" olmalıdır.
+ */
+async function injectMainWorld(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["src/injected.js"],
+      world: "MAIN"
+    });
+    return true;
+  } catch (e) {
+    warn("MAIN world enjeksiyonu başarısız:", e.message);
+    return false;
+  }
+}
+
+/**
+ * Açık TCDD sekmelerine content script'i enjekte eder.
+ * Eklenti kurulduğunda/güncellendiğinde açık sekmeler content script'siz kalır;
+ * bu da sayfa bağlamındaki yakalamayı sessizce devre dışı bırakır.
+ */
+async function injectIntoOpenTabs() {
+  try {
+    const tabs = await chrome.tabs.query({ url: TCDD_URL_MATCH });
+    for (const tab of tabs) {
+      const ok = await ensureContentScript(tab.id);
+      if (ok) await appendLog("info", `Açık TCDD sekmesine bağlanıldı (#${tab.id}).`);
+    }
+  } catch (e) {
+    warn("Açık sekmelere enjeksiyon hatası:", e);
+  }
+}
+
 /** Content script yaşıyor mu? */
 async function pingContent(tabId) {
   try {
@@ -264,6 +364,7 @@ async function pingContent(tabId) {
  * gerekirse elle enjekte ediyoruz.
  */
 async function ensureContentScript(tabId) {
+  await injectMainWorld(tabId); // köprü her durumda güncel olsun
   if (await pingContent(tabId)) return true;
   try {
     await chrome.scripting.executeScript({
@@ -470,14 +571,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
 
-        case MSG.CAPTURED_TEMPLATE: {
-          // Kullanıcının gerçek aramasından alınan istek gövdesi şablon olarak saklanır.
-          const templates = await getStore(KEYS.templates, {});
-          templates[msg.kind] = { url: msg.url, body: msg.body, at: Date.now() };
-          await setStore(KEYS.templates, templates);
-          await appendLog("info", `İstek şablonu güncellendi: ${msg.kind} (${msg.url})`);
-          broadcast(MSG.STATE_CHANGED, { templates: templateInfo(templates) });
+        case MSG.READ_PAGE: {
+          // Popup -> açık TCDD sekmesi: ekrandaki istasyon/tarih/saat bilgisi.
+          const tab = await findTcddTab();
+          if (!tab) {
+            sendResponse({ ok: false, error: "TCDD sekmesi açık değil." });
+            break;
+          }
+          if (!(await ensureContentScript(tab.id))) {
+            sendResponse({ ok: false, error: "Sayfaya bağlanılamadı. TCDD sayfasını yenileyin." });
+            break;
+          }
+          try {
+            sendResponse(await chrome.tabs.sendMessage(tab.id, { type: MSG.READ_PAGE }));
+          } catch (e) {
+            sendResponse({ ok: false, error: e.message });
+          }
+          break;
+        }
+
+        case MSG.CAPTURED_TEMPLATE:
+          await storeTemplate(msg.kind, msg.url, msg.body, "page");
           sendResponse({ ok: true });
+          break;
+
+        case MSG.INJECT_MAIN: {
+          // Sayfa bağlamı köprüsünü CSP'den etkilenmeyen yoldan enjekte et.
+          const tabId = sender && sender.tab && sender.tab.id;
+          sendResponse({ ok: tabId ? await injectMainWorld(tabId) : false });
           break;
         }
 
@@ -580,15 +701,21 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     // saatler güncellemede sıfırlanır; ilk taramada yeniden doldurulur.
     await setStore(KEYS.timetables, {});
     await appendLog("info", "Eklenti güncellendi. Öğrenilen sefer saatleri sıfırlandı.");
+    await injectIntoOpenTabs();
     return;
   }
 
   await appendLog("info", "Eklenti kuruldu. TCDD sayfasında bir kez manuel arama yapmanız gerekir.");
+  await injectIntoOpenTabs();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   // Tarayıcı yeniden açıldığında tarama otomatik başlamasın.
   await setState({ running: false, paused: false, reason: "browser-restart" });
+  await injectIntoOpenTabs();
 });
+
+// Service worker uyandığında da açık sekmelerle bağı tazele.
+injectIntoOpenTabs();
 
 log("Service worker hazır.");

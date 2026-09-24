@@ -238,24 +238,38 @@
     extractTime(text) {
       const str = String(text || "");
       const pad = (v) => String(v).padStart(2, "0");
+      const cfg = (globalThis.TCDD_CONFIG && globalThis.TCDD_CONFIG.API_TIME) || {
+        naiveIsUtc: true,
+        offsetMinutes: 180
+      };
 
-      // Açık saat dilimi taşıyan ISO değerleri (…Z veya …+03:00) yerel saate
-      // çevrilir; aksi halde 3 saatlik kayma yüzünden hiçbir sefer eşleşmez.
+      /** UTC milisaniyeyi sefer saatine (sabit ofset) çevirir. */
+      const toServiceTime = (utcMs) => {
+        const d = new Date(utcMs + cfg.offsetMinutes * 60000);
+        return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+      };
+
+      // 1) Açık saat dilimi taşıyan ISO değerleri (…Z veya …+03:00)
       const zoned = str.match(
         /(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})/
       );
       if (zoned) {
         const d = new Date(zoned[0].replace(" ", "T"));
-        if (!isNaN(d.getTime())) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        if (!isNaN(d.getTime())) return toServiceTime(d.getTime());
       }
 
+      // 2) Ek taşımayan tam ISO değeri: API bunu UTC olarak gönderiyor.
       let m = str.match(/(\d{4})-(\d{1,2})-(\d{1,2})[T\s](\d{1,2}):([0-5]\d)/);
-      if (m) return `${pad(m[4])}:${m[5]}`;
+      if (m) {
+        if (!cfg.naiveIsUtc) return `${pad(m[4])}:${m[5]}`;
+        return toServiceTime(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));
+      }
 
+      // 3) "25-09-2026 09:40:00" biçimi (arayüzde yerel saat olarak kullanılır)
       m = str.match(/(\d{1,2})[-./](\d{1,2})[-./](\d{4})[T\s](\d{1,2}):([0-5]\d)/);
       if (m) return `${pad(m[4])}:${m[5]}`;
 
-      // Öncesinde rakam veya ':' olmayan ilk HH:mm
+      // 4) Düz metindeki ilk HH:mm (DOM): öncesinde rakam veya ':' olmamalı
       m = str.match(/(?:^|[^\d:])([01]?\d|2[0-3])[:.]([0-5]\d)/);
       return m ? `${pad(m[1])}:${m[2]}` : null;
     },

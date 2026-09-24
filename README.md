@@ -48,8 +48,11 @@ popup  ──START──▶  background ──CONTENT_START──▶  content.js
    Bu adım şart: token'lar, Captcha oturumu **ve API adresi** ancak gerçek bir istekten
    yakalanabilir. Popup'taki `JWT` / `XSRF` / `Captcha` / `Uç nokta` rozetlerinin dördü de
    yeşile döndüğünde hazırsınız.
-3. Eklenti popup'ını açın, **"↺ Son manuel aramadan doldur"** butonuna basın — kalkış/varış
-   istasyonları ve ID'leri yaptığınız aramadan otomatik doldurulur.
+3. Eklenti popup'ını açın, **"↺ Sayfadan doldur"** butonuna basın. Bu buton iki kaynağı
+   birleştirir:
+   - **Açık TCDD sayfasından (DOM):** istasyon adları, tarih ve ekranda listelenen
+     **tüm sefer kalkış saatleri** — bunlar saat seçim listesini oluşturur.
+   - **Yakalanan istekten:** istasyon ID'leri (DOM'da bulunmadıkları için).
 4. Tarih, sefer saatleri, yolcu sayısı, **her yolcunun cinsiyeti** ve vagon tipini seçip
    **Taramayı Başlat**'a basın.
    Tekerlekli sandalye koltukları varsayılan olarak yok sayılır (bkz. aşağıdaki bölüm).
@@ -114,14 +117,23 @@ seçilmezse tüm seferler taranır.
   tanımlı tarifesi olmayan güzergâhlarda (ör. ters yön) liste bir taramadan sonra kendiliğinden
   oluşur. Tarifesi hiç bilinmeyen güzergâhta arayüz saat aralığına düşer.
 
-#### Saat eşleşmiyorsa ("0 tanesi hedef saatlerde")
+#### Saat dilimi: API UTC gönderiyor
 
-Seçtiğiniz saatlerle API'nin döndürdüğü saatler tutmayabilir. İki bilinen sebep var:
+TCDD API'si kalkış saatlerini **UTC olarak, saat dilimi eki olmadan** gönderir:
 
-1. **Saat dilimi** — yanıt `…Z` veya `…+03:00` gibi açık saat dilimi taşıyorsa değer yerel saate
-   çevrilir; taşımıyorsa duvar saati kabul edilir.
-2. **Farklı biniş istasyonu** — tarifedeki saat Söğütlüçeşme'ye, yanıttaki saat trenin çıkış
-   istasyonuna (ör. Halkalı) ait olabilir. Bu, tüm seferlerde **sabit** bir fark yaratır.
+```
+"2026-09-26T02:30:00"   ->   gerçek kalkış 05:30 (TSİ)
+```
+
+Bu yüzden ek taşımayan ISO değerleri UTC kabul edilip **sabit UTC+3** ile sefer saatine çevrilir
+(`src/config.js` → `API_TIME`). Tarayıcının yerel saati kullanılmaz; yurt dışındaki bir
+kullanıcıda da tarife doğru görünür. `…Z` / `…+03:00` taşıyan değerler de aynı sonuca çevrilir.
+API bir gün yerel saat göndermeye başlarsa `API_TIME.naiveIsUtc = false` yapmak yeterlidir.
+
+#### Saat yine de eşleşmiyorsa ("0 tanesi hedef saatlerde")
+
+Geriye kalan olası sebep, tarifedeki saatin farklı bir biniş istasyonuna (ör. Halkalı) ait
+olmasıdır; bu, tüm seferlerde **sabit** bir fark yaratır.
 
 Eklenti bu durumda kör kalmaz:
 

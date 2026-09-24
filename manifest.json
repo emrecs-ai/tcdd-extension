@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TCDD e-Bilet Koltuk Tarayıcı",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "TCDD e-bilet sisteminde boş koltuk taraması yapar ve koltuk bulunduğunda seçim adımlarını otomatikleştirir.",
   "minimum_chrome_version": "102",
 

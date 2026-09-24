@@ -90,6 +90,8 @@
       CONTENT_START: "CONTENT_START",
       CONTENT_STOP: "CONTENT_STOP",
       CONTENT_PING: "CONTENT_PING",
+      INJECT_MAIN: "INJECT_MAIN",
+      READ_PAGE: "READ_PAGE",
       // content -> background
       AUTH_EXPIRED: "AUTH_EXPIRED",
       SEATS_FOUND: "SEATS_FOUND",
@@ -177,6 +179,25 @@
       }
     },
 
+    /**
+     * API SAAT DİLİMİ
+     * -------------------------------------------------------------------------
+     * TCDD API'si kalkış saatlerini UTC olarak, fakat saat dilimi eki OLMADAN
+     * gönderiyor:  "2026-09-26T02:30:00"  ->  gerçek kalkış 05:30 (TSİ).
+     *
+     * Bu yüzden ek taşımayan ISO değerleri UTC kabul edilip Türkiye saatine
+     * çevrilir. Türkiye 2016'dan beri sabit UTC+3 kullandığı için sabit ofset
+     * yeterlidir; tarayıcının yerel saati kullanılmaz, böylece yurt dışındaki
+     * bir kullanıcıda da tarife doğru görünür.
+     *
+     * API bir gün yerel saat göndermeye başlarsa naiveIsUtc = false yapmak
+     * yeterlidir (ayrıca sabit kayma hizalaması güvenlik ağı olarak durur).
+     */
+    API_TIME: {
+      naiveIsUtc: true,
+      offsetMinutes: 180
+    },
+
     /** Varsayılan tarama parametreleri. */
     DEFAULTS: {
       intervalSec: 20,        // taramalar arası bekleme
@@ -193,6 +214,21 @@
      * Bir adım çalışmıyorsa DevTools'tan doğru seçiciyi bulup buraya eklemek yeterlidir.
      */
     SELECTORS: {
+      // Arama çubuğundaki istasyon alanları
+      stationInput: [
+        "input[class*='istasyon']",
+        "input[class*='station']",
+        "input[placeholder*='ereden']",
+        "input[placeholder*='ereye']",
+        "input[type='text']"
+      ],
+      // Seçili tarih sekmesi
+      selectedDate: [
+        "[class*='selected'][class*='date']",
+        "[class*='active'][class*='tarih']",
+        "[class*='date'][class*='active']",
+        "[aria-selected='true']"
+      ],
       // Sefer listesi satırları
       trainRow: [
         "[class*='sefer-karti']",

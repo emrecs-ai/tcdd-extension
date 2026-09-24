@@ -163,9 +163,16 @@
 
     const learnedTimes = (learned && learned.times) || [];
 
-    // Sabit tarife varsa gösterim yalnızca onun üzerinden yapılır.
-    // Öğrenilen saatleri buraya karıştırmak, ayrıştırma hatalarının (ör. eski
-    // saat dilimi okumalarının) listeye kalıcı olarak sızmasına yol açıyor.
+    // Sayfadan okunan / taramadan öğrenilen saatler önceliklidir: bunlar
+    // sistemin gerçekte döndürdüğü seferlerdir. Yapılandırmadaki sabit tarife
+    // yalnızca henüz veri yokken kullanılır.
+    if (learnedTimes.length) {
+      return {
+        label: (learned.label || (known && known.label) || "Sefer saatleri") + " · sayfadan",
+        times: learnedTimes.slice().sort(),
+        learnedOnly: new Set(known ? learnedTimes.filter((t) => !known.times.includes(t)) : [])
+      };
+    }
     if (known) return { label: known.label, times: known.times.slice(), learnedOnly: new Set() };
     if (learnedTimes.length) {
       return {
@@ -380,21 +387,58 @@
     return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
   }
 
+  /**
+   * Formu doldurur. İki kaynak birleştirilir:
+   *   - Açık TCDD sayfası (DOM): istasyon adları, tarih ve LİSTELENEN SEFER SAATLERİ
+   *   - Yakalanan istek gövdesi: istasyon ID'leri (DOM'da bulunmuyor)
+   */
   async function fillFromCapture() {
-    const data = await chrome.storage.local.get([KEYS.templates, KEYS.stations]);
+    showError("");
+    const data = await chrome.storage.local.get([KEYS.templates, KEYS.stations, KEYS.timetables]);
+    learnedTimetables = data[KEYS.timetables] || {};
     const tpl = (data[KEYS.templates] || {}).availability;
-    if (!tpl || !tpl.body) {
-      showError("Henüz yakalanmış bir arama yok. Önce TCDD sayfasında manuel arama yapın.");
+
+    // 1) Sayfadan oku
+    let page = null;
+    const res = await send(MSG.READ_PAGE);
+    if (res && res.ok && res.context) page = res.context;
+
+    if (!page && !tpl) {
+      showError(
+        (res && res.error ? res.error + " " : "") +
+          "TCDD sayfasında bir arama yapın; istasyon, tarih ve sefer saatleri oradan okunacak."
+      );
       return;
     }
 
-    const route = extractRoute(tpl.body);
+    // 2) İstasyon ID'leri yalnızca yakalanan istekte var
+    const route = tpl && tpl.body ? extractRoute(tpl.body) : {};
     if (route.fromId) els.fromId.value = route.fromId;
-    if (route.fromName) els.fromName.value = route.fromName;
     if (route.toId) els.toId.value = route.toId;
-    if (route.toName) els.toName.value = route.toName;
-    const iso = apiDateToISO(route.date);
+
+    // 3) Adlar ve tarih: önce sayfa, yoksa yakalanan istek
+    const fromName = (page && page.fromName) || route.fromName || "";
+    const toName = (page && page.toName) || route.toName || "";
+    if (fromName) els.fromName.value = fromName;
+    if (toName) els.toName.value = toName;
+
+    const iso = (page && page.date) || apiDateToISO(route.date);
     if (iso && iso >= todayISO()) els.date.value = iso;
+
+    // 4) Sayfadaki sefer saatleri bu güzergâhın tarifesi olarak kaydedilir
+    if (page && page.times && page.times.length && els.fromId.value && els.toId.value) {
+      const key = `${els.fromId.value}-${els.toId.value}`;
+      learnedTimetables[key] = {
+        label: `${fromName} → ${toName}`.trim(),
+        times: page.times,
+        at: Date.now()
+      };
+      await chrome.storage.local.set({ [KEYS.timetables]: learnedTimetables });
+    }
+
+    if (!els.fromId.value || !els.toId.value) {
+      showError("İstasyon ID'leri okunamadı: TCDD sayfasında bir kez arama yapın, sonra tekrar deneyin.");
+    }
 
     // İstasyon önbelleğini güncelle (datalist için).
     const stations = data[KEYS.stations] || { list: [] };
@@ -402,14 +446,13 @@
       if (!id || !name) return;
       if (!stations.list.some((x) => String(x.id) === String(id))) stations.list.push({ id, name });
     };
-    add(route.fromId, route.fromName);
-    add(route.toId, route.toName);
+    add(els.fromId.value, fromName);
+    add(els.toId.value, toName);
     stations.fetchedAt = Date.now();
     await chrome.storage.local.set({ [KEYS.stations]: stations });
 
     renderStations(stations);
     renderTimetable();
-    showError("");
   }
 
   function renderStations(stations) {

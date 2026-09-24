@@ -10,8 +10,9 @@
  * ekleyip ayrıştırıcıyı ona göre güncellemek en hızlı yoldur.
  * -----------------------------------------------------------------------------
  */
-// Saat dilimi çevriminin doğrulanabilmesi için sabit bölge.
-process.env.TZ = "Europe/Istanbul";
+// Sefer saatleri sabit ofsetle (UTC+3) hesaplanır; sonuç tarayıcının yerel
+// saatinden bağımsız olmalı. Bunu kanıtlamak için bilinçli olarak UTC seçildi.
+process.env.TZ = "UTC";
 
 const fs = require("fs");
 const vm = require("vm");
@@ -73,7 +74,7 @@ const availability = {
             {
               id: 90001,
               commercialName: "YHT 12345",
-              segments: [{ departureTime: "2026-09-25T08:15:00", arrivalTime: "2026-09-25T12:45:00" }],
+              segments: [{ departureTime: "2026-09-25T05:15:00", arrivalTime: "2026-09-25T09:45:00" }],
               cabinClassAvailabilities: [
                 { cabinClass: { name: "EKONOMİ" }, availabilityCount: 0 },
                 { cabinClass: { name: "BUSINESS" }, availabilityCount: 0 }
@@ -82,7 +83,7 @@ const availability = {
             {
               id: 90002,
               commercialName: "YHT 12347",
-              segments: [{ departureTime: "2026-09-25T14:30:00" }],
+              segments: [{ departureTime: "2026-09-25T11:30:00" }],
               cabinClassAvailabilities: [
                 { cabinClass: { name: "EKONOMİ" }, availabilityCount: 3 },
                 { cabinClass: { name: "BUSINESS" }, availabilityCount: 1 }
@@ -91,7 +92,7 @@ const availability = {
             {
               id: 90003,
               commercialName: "YHT 12349",
-              segments: [{ departureTime: "2026-09-25T21:00:00" }],
+              segments: [{ departureTime: "2026-09-25T18:00:00" }],
               cabinClassAvailabilities: [{ cabinClass: { name: "EKONOMİ" }, availabilityCount: 12 }]
             }
           ]
@@ -264,7 +265,9 @@ check("wantsWheelchair varsayılan", D.wantsWheelchair({ cabinClass: "AUTO" }) =
 
 /* ---- Örnek 3b: saf yardımcı fonksiyonlar ---- */
 const DU = sandbox.TCDD_DOM;
-check("ISO saat", DU.extractTime("2026-09-25T08:15:00") === "08:15", DU.extractTime("2026-09-25T08:15:00"));
+// API ek taşımayan ISO değerlerini UTC olarak gönderiyor: 02:30 -> 05:30 (TSİ)
+check("ofsetsiz ISO UTC kabul ediliyor", DU.extractTime("2026-09-26T02:30:00") === "05:30", DU.extractTime("2026-09-26T02:30:00"));
+check("gerçek örnek: 04:20 -> 07:20", DU.extractTime("2026-09-26T04:20:00") === "07:20");
 check("TR tarih saat", DU.extractTime("25-09-2026 09:40:00") === "09:40");
 check("düz saat", DU.extractTime("08:15 Ankara Gar") === "08:15");
 check("saniye saat sanılmıyor", DU.extractTime("08:15:59") === "08:15");
@@ -306,7 +309,9 @@ check("boş listede boş plan", D.pickSeatsForPassengers([], 2).length === 0);
 /* ---- Örnek 3e: saat dilimi ve sabit kayma hizalaması ---- */
 check("UTC ISO yerel saate çevriliyor", DU.extractTime("2026-09-27T08:10:00Z") === "11:10", DU.extractTime("2026-09-27T08:10:00Z"));
 check("+03:00 ofseti korunuyor", DU.extractTime("2026-09-27T11:10:00+03:00") === "11:10");
-check("ofsetsiz değer duvar saati sayılıyor", DU.extractTime("2026-09-27T11:10:00") === "11:10");
+check("çevrim yerel saatten bağımsız", DU.extractTime("2026-09-27T08:10:00Z") === "11:10");
+check("gün sınırı doğru sarıyor", DU.extractTime("2026-09-26T22:30:00") === "01:30", DU.extractTime("2026-09-26T22:30:00"));
+check("TR biçimi duvar saati kalıyor", DU.extractTime("25-09-2026 09:40:00") === "09:40");
 check("dakikadan saate", DU.fromMinutes(670) === "11:10" && DU.fromMinutes(-20) === "23:40");
 
 const aligned = D.alignTimes(["11:10", "11:50", "12:20"], ["10:53", "11:33", "12:03", "15:23"]);

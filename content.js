@@ -70,6 +70,10 @@
   };
 
   function injectPageScript() {
+    // Öncelikli yol: background üzerinden chrome.scripting + world:"MAIN".
+    // Sayfanın CSP'si <script src> ile enjeksiyonu engelleyebiliyor.
+    send(MSG.INJECT_MAIN).catch(() => {});
+
     if (document.getElementById("tcdd-ext-injected")) return;
     const script = document.createElement("script");
     script.id = "tcdd-ext-injected";
@@ -1351,6 +1355,123 @@
   }
 
   /* ====================================================================== */
+  /* Sayfadan okuma (istasyon / tarih / sefer saatleri)                     */
+  /* ====================================================================== */
+
+  /** Metin bir istasyon adına benziyor mu? */
+  function looksLikeStation(text) {
+    const t = String(text || "").trim();
+    if (t.length < 3 || t.length > 60) return false;
+    if (/^\d/.test(t)) return false;
+    if (U.extractTime(t)) return false;
+    return (t.match(/[A-Za-zÇĞİÖŞÜçğıöşü]/g) || []).length >= 3;
+  }
+
+  /**
+   * Metni yalnızca bir saatten ibaret olan görünür elemanlar ("05:30" hücreleri).
+   * Kartları metin üzerinden aramak kırılgan: innerText bitişik gelebiliyor
+   * ("05:3009:59") ve kelime sınırları çöküyor.
+   */
+  function findTimeCells() {
+    return Array.from(document.querySelectorAll("span,div,td,p,b,strong,time,h4,h5"))
+      .filter(U.isVisible)
+      .filter((el) => /^([01]?\d|2[0-3])[:.][0-5]\d$/.test(U.textOf(el).trim()));
+  }
+
+  /**
+   * Sefer kartları: içinde 2-4 saat hücresi bulunan EN DIŞ ata.
+   * Daha yukarısı birden fazla kartı kapsayacağı için sınır 4 hücredir.
+   */
+  function findTripCards() {
+    const cells = findTimeCells();
+    if (cells.length < 2) return [];
+
+    const cards = new Set();
+    for (const cell of cells) {
+      let node = cell.parentElement;
+      let chosen = null;
+      let depth = 0;
+
+      while (node && depth < 10) {
+        const count = cells.filter((c) => node.contains(c)).length;
+        if (count > 4) break;
+        if (count >= 2) chosen = node;
+        node = node.parentElement;
+        depth++;
+      }
+      if (chosen) cards.add(chosen);
+    }
+    return Array.from(cards);
+  }
+
+  /**
+   * Açık TCDD sayfasından arama bağlamını okur:
+   * istasyon adları, tarih ve listelenen tüm sefer kalkış saatleri.
+   *
+   * İstasyon ID'leri DOM'da bulunmadığı için onlar yakalanan istek
+   * şablonundan gelir; burada yalnızca ekranda görünen bilgiler okunur.
+   */
+  function readPageContext() {
+    const ctx = { fromName: "", toName: "", date: "", times: [], notes: [] };
+
+    /* --- İstasyonlar: önce arama çubuğundaki input değerleri --- */
+    const values = U.queryAllCandidates(CFG.SELECTORS.stationInput)
+      .filter(U.isVisible)
+      .map((el) => String(el.value || "").trim())
+      .filter(looksLikeStation);
+
+    if (values.length >= 2) {
+      ctx.fromName = values[0];
+      ctx.toName = values[1];
+      ctx.notes.push("istasyonlar: arama çubuğu");
+    } else {
+      // Yedek: "İSTANBUL(SÖĞÜTLÜÇEŞME) ⇄ ANKARA GAR" gibi başlık metinleri
+      const arrow = /\s(?:⇄|⇆|↔|→|➔|->)\s/;
+      const header = Array.from(document.querySelectorAll("h1,h2,h3,h4,div,span,p"))
+        .filter(U.isVisible)
+        .map((el) => U.textOf(el))
+        .find((text) => text && text.length < 120 && arrow.test(text));
+
+      if (header) {
+        const parts = header.split(arrow).map((x) => x.replace(/^Gidiş\s*-\s*/i, "").trim());
+        if (parts.length >= 2 && looksLikeStation(parts[0]) && looksLikeStation(parts[1])) {
+          ctx.fromName = parts[0];
+          ctx.toName = parts[1];
+          ctx.notes.push("istasyonlar: sayfa başlığı");
+        }
+      }
+    }
+
+    /* --- Tarih: kartlarda geçen en sık gg.aa.yyyy --- */
+    // \b kullanılmıyor: "27.09.2026Direkt" gibi bitişik metinlerde sınır oluşmaz.
+    const dates = document.body.innerText.match(/(?<!\d)\d{2}\.\d{2}\.\d{4}(?!\d)/g) || [];
+    if (dates.length) {
+      const counts = new Map();
+      for (const d of dates) counts.set(d, (counts.get(d) || 0) + 1);
+      const best = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0][0];
+      const m = best.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+      ctx.date = `${m[3]}-${m[2]}-${m[1]}`;
+      ctx.notes.push("tarih: sefer kartları");
+    }
+
+    /* --- Sefer saatleri: her kartın İLK saati kalkış saatidir --- */
+    const cards = findTripCards();
+    const cells = findTimeCells();
+    const times = [];
+    for (const card of cards) {
+      // Kart içindeki İLK saat hücresi kalkış, ikincisi varış saatidir.
+      const first = cells.find((c) => card.contains(c));
+      const time = first ? U.extractTime(U.textOf(first)) : null;
+      if (time && !times.includes(time)) times.push(time);
+    }
+    ctx.times = times.sort();
+    if (times.length) ctx.notes.push(`${times.length} sefer saati okundu`);
+
+    U.log("Sayfadan okunan bağlam:", ctx);
+    return ctx;
+  }
+
+  /* ====================================================================== */
   /* 6) Background mesajları                                                */
   /* ====================================================================== */
 
@@ -1366,6 +1487,15 @@
 
       case MSG.CONTENT_STOP:
         sendResponse(stopScan(msg.reason || "background"));
+        break;
+
+      case MSG.READ_PAGE:
+        try {
+          sendResponse({ ok: true, context: readPageContext() });
+        } catch (e) {
+          U.error("Sayfa okuma hatası:", e);
+          sendResponse({ ok: false, error: String(e.message || e) });
+        }
         break;
 
       default:
@@ -1400,6 +1530,9 @@
     buildSearchBody,
     buildSeatMapBody,
     resolveEndpoint,
+    readPageContext,
+    findTripCards,
+    findTimeCells,
     matchesTime,
     alignTimes,
     apiRequest,
