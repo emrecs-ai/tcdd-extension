@@ -96,6 +96,7 @@
             <option value="Business">Business</option>
             <option value="Yataklı">Yataklı</option>
             <option value="Örtülü Kuşet">Örtülü Kuşet</option>
+            <option value="Tekerlekli Sandalye">Tekerlekli Sandalye</option>
           </select>
         </label>
       </div>
@@ -120,6 +121,15 @@
           </label>
         </div>
       </div>
+
+      <label class="switch switch-block">
+        <input type="checkbox" id="includeWheelchair" />
+        <span>Tekerlekli sandalye (engelli) koltuklarını dahil et</span>
+      </label>
+      <p class="hint hint-inline" id="wheelchairHint">
+        Varsayılan olarak bu koltuklar yok sayılır; yalnızca onlar boşken alarm verilmez ve
+        otomatik seçim başlatılmaz.
+      </p>
 
       <div class="actions">
         <button class="btn btn-primary" id="btnStart" type="submit">Taramayı Başlat</button>

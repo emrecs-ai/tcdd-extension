@@ -50,10 +50,41 @@ popup  ──START──▶  background ──CONTENT_START──▶  content.js
 3. Eklenti popup'ını açın, **"↺ Son manuel aramadan doldur"** butonuna basın — kalkış/varış
    istasyonları ve ID'leri yaptığınız aramadan otomatik doldurulur.
 4. Tarih, saat aralığı, yolcu sayısı, cinsiyet ve vagon tipini seçip **Taramayı Başlat**'a basın.
+   Tekerlekli sandalye koltukları varsayılan olarak yok sayılır (bkz. aşağıdaki bölüm).
 5. TCDD sekmesini **açık bırakın**. Tarama o sekmede çalışır.
 
 Koltuk bulunduğunda: bildirim gelir → tarama durur → DOM otomasyonu koltuğu seçer →
 "Bilet Seçildi, Ödeme Yapın" bildirimi gelir.
+
+### Tekerlekli sandalye (engelli) koltukları
+
+Standart sınıflar dolu olsa bile bu koltuklar boş kalabildiği için **varsayılan olarak
+tamamen yok sayılır**: alarm üretmezler ve otomatik seçimi başlatmazlar. Filtre üç katmanda
+çalışır:
+
+1. **Kabin sayımı** — sefer yanıtındaki vagon tipi kırılımında tekerlekli sandalye sınıfına
+   ait boş yerler toplama katılmaz. Sadece o sınıf boşsa tarama "boş yer yok" kabul edip
+   devam eder (log'a bilgi satırı düşer).
+2. **Koltuk haritası** — kabin kırılımı yoksa ya da yanıltıcıysa ikinci kapı burasıdır.
+   `purchasableSeats` içindeki koltuklar; koltuğun kendi tip/açıklama alanı, boolean bayrağı
+   (`isWheelchairSeat` vb.) veya bulunduğu vagonun sınıf adı/ID'si üzerinden elenir.
+   Boş koltukların tamamı bu sınıftaysa alarm verilmez, tarama sürer.
+3. **DOM otomasyonu** — son kontrol noktası. Koltuk haritasındaki `engelli` / `tekerlekli` /
+   `wheelchair` işaretli elemanlara tıklanmaz (yedek "ilk boş koltuk" seçimi dahil).
+
+Bu koltukları taramaya dahil etmek için popup'taki **"Tekerlekli sandalye (engelli)
+koltuklarını dahil et"** kutusunu işaretleyin. Vagon tipi olarak **"Tekerlekli Sandalye"**
+seçerseniz tarama yalnızca bu koltukları hedefler (kutu otomatik işaretlenir ve kilitlenir).
+
+Eşleştirme `src/config.js` → `WHEELCHAIR` altındadır:
+
+| Alan | Görev |
+|---|---|
+| `namePatterns` | Sınıf/koltuk adı eşleşmeleri ("tekerlekli sandalye", "engelli", "wheelchair" ...) |
+| `classIds` | Bilinen sınıf ID'leri. TCDD adı değiştirirse ID eklemek filtreyi ayakta tutar. |
+| `flagKeys` | Boolean bayrak anahtarları. `disabled` gibi çok anlamlı alanlar bilinçli olarak dışarıda (bazı şemalarda "seçilemez" demek). |
+
+`SELECTORS.wheelchairSeatMarkers` ise DOM tarafındaki işaretleri tutar.
 
 ### Captcha / oturum süresi dolarsa
 
@@ -94,8 +125,9 @@ Tüm beklemeler `MutationObserver` + periyodik yoklama ile yapılır (`src/dom-u
 - Sayfa konsolundan ayrıştırıcıları doğrudan deneyebilirsiniz:
 
 ```js
-__TCDD_DEBUG__.extractTrains(yanitJson);
-__TCDD_DEBUG__.extractEmptySeats(koltukHaritasiJson);
+__TCDD_DEBUG__.extractTrains(yanitJson);            // [{ time, emptyCount, cabins: [{label,id,count,wheelchair}] }]
+__TCDD_DEBUG__.extractEmptySeats(koltukHaritasiJson, {});  // { seats, total, wheelchairSkipped }
+__TCDD_DEBUG__.isWheelchairLabel("Tekerlekli Sandalye");   // true
 __TCDD_DEBUG__.state;
 ```
 
@@ -120,6 +152,8 @@ ayrıştırıcıyı ona göre güncellemek en hızlı yoldur.
 | "Yanıt ayrıştırılamadı veya sefer bulunamadı" | API şeması değişmiş olabilir. Debug modunu açıp ham yanıta bakın, `RE` desenlerini güncelleyin. |
 | Koltuk bulunuyor ama DOM adımları takılıyor | `src/config.js` → `SELECTORS` içindeki aday seçicileri güncelleyin. |
 | Tarama kendiliğinden durdu | Sekme kapandı ya da ardışık ağ hatası sınırı aşıldı (`DEFAULTS.maxConsecutiveErrors`). |
+| "Yalnızca tekerlekli sandalye koltuğu boş" logu geliyor | Beklenen davranış. Bu koltukları da istiyorsanız popup'taki kutuyu işaretleyin. |
+| Engelli koltuğu alarm üretiyor | Sınıf adı beklenenden farklı olabilir. Debug modunda ham yanıttaki sınıf adını/ID'sini görüp `WHEELCHAIR.namePatterns` veya `classIds` listesine ekleyin. |
 
 ## 7. Sorumlu kullanım
 
@@ -129,6 +163,8 @@ ayrıştırıcıyı ona göre güncellemek en hızlı yoldur.
   Captcha'yı çözmeye veya güvenlik kontrollerini atlatmaya çalışmaz — süresi dolduğunda durur
   ve sizden manuel çözüm ister.
 - Ödeme/satın alma adımı otomatikleştirilmez.
+- Tekerlekli sandalye (engelli) koltukları varsayılan olarak hiç taranmaz; bu koltukların
+  ihtiyaç sahiplerine kalması için filtre bilinçli olarak "varsayılan açık" tasarlanmıştır.
 - Kişisel kullanım içindir; TCDD'nin kullanım koşullarına uymak kullanıcının sorumluluğundadır.
 
 ## 8. Dosya düzeni

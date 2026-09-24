@@ -264,8 +264,49 @@
     occupied: /(occupied|dolu|reserved|isSold|taken)$/i,
     carNo: /(carName|carNo|carNumber|trainCarName|vagonNo|wagonNo|wagonNumber|carIndex)$/i,
     carId: /(trainCarId|carId|vagonId)$/i,
-    cabinName: /(cabinClassName|className|vagonTipi|cabinName|typeName)$/i
+    cabinName: /(cabinClassName|className|vagonTipi|cabinName|typeName)$/i,
+    cabinId: /(cabinClassId|classId|cabinId|vagonTipiId|ticketClassId|seatTypeId)$/i,
+    // Koltuğun kendi tip/açıklama alanları (tekerlekli sandalye tespiti için)
+    seatTypeName: /(seatType|seatClass|seatDescription|koltukTip|koltukTuru|facility|feature|description)/i
   };
+
+  /* ---------------------------------------------------------------------- */
+  /* Tekerlekli sandalye (engelli) koltuk tespiti                            */
+  /* ---------------------------------------------------------------------- */
+
+  /** Sınıf/koltuk adı tekerlekli sandalye sınıfına mı işaret ediyor? */
+  function isWheelchairLabel(label) {
+    if (!label) return false;
+    const norm = U.normalize(label);
+    if (!norm) return false;
+    return CFG.WHEELCHAIR.namePatterns.some((patt) => norm.includes(U.normalize(patt)));
+  }
+
+  /** Sınıf ID'si, yapılandırmadaki bilinen tekerlekli sandalye ID'lerinden biri mi? */
+  function isWheelchairId(id) {
+    if (id === undefined || id === null || id === "") return false;
+    return CFG.WHEELCHAIR.classIds.some((x) => String(x) === String(id));
+  }
+
+  /**
+   * Bir düğüm (koltuk ya da kabin) tekerlekli sandalye sınıfına mı ait?
+   * Ad, ID ve boolean bayrak olmak üzere üç kanaldan bakılır.
+   * Not: "disabled: true" gibi çok anlamlı alanlar bilinçli olarak bayrak
+   * sayılmaz; o alanlar bazı şemalarda "seçilemez" anlamına gelir.
+   */
+  function isWheelchairNode(node) {
+    if (!node || typeof node !== "object") return false;
+
+    for (const key of Object.keys(node)) {
+      const v = node[key];
+      if (v === true && CFG.WHEELCHAIR.flagKeys.test(key)) return true;
+      if (typeof v === "string" && (RE.cabinName.test(key) || RE.seatTypeName.test(key)) && isWheelchairLabel(v)) {
+        return true;
+      }
+      if (RE.cabinId.test(key) && isWheelchairId(v)) return true;
+    }
+    return false;
+  }
 
   /** Alt ağaçta (sınırlı derinlikte) kalkış saati taşıyan ilk değeri bulur. */
   function findDepartureTime(node, maxDepth) {
@@ -295,7 +336,8 @@
 
   /**
    * Bir sefer düğümü içindeki vagon tipi (kabin) bazlı boş yer sayılarını çıkarır.
-   * Örn: [{ label: "EKONOMİ", count: 3 }, { label: "BUSINESS", count: 1 }]
+   * Örn: [{ label: "EKONOMİ", id: 1, count: 3, wheelchair: false }]
+   * "wheelchair" işaretli kabinler varsayılan olarak sayıma katılmaz.
    */
   function extractCabins(trainNode) {
     const cabins = [];
@@ -306,20 +348,33 @@
       const countKey = Object.keys(n).find((k) => RE.empty.test(k) && typeof n[k] === "number");
       if (countKey) {
         let label = pick(n, RE.cabinName);
-        if (label === undefined) {
-          // { cabinClass: { name: "EKONOMİ" }, availabilityCount: 3 } biçimi
+        let cabinId = pick(n, RE.cabinId);
+        let wheelchair = isWheelchairNode(n);
+
+        if (label === undefined || cabinId === undefined) {
+          // { cabinClass: { id: 4, name: "EKONOMİ" }, availabilityCount: 3 } biçimi
           for (const k of Object.keys(n)) {
             const v = n[k];
             if (v && typeof v === "object" && !Array.isArray(v)) {
               const nested = pick(v, /^(name|ad|adi|cabinClassName)$/i);
-              if (typeof nested === "string") {
-                label = nested;
-                break;
+              if (label === undefined && typeof nested === "string") label = nested;
+              if (cabinId === undefined) {
+                const nestedId = pick(v, /^(id|cabinClassId|classId)$/i);
+                if (nestedId !== undefined) cabinId = nestedId;
               }
+              if (!wheelchair && isWheelchairNode(v)) wheelchair = true;
+              if (label !== undefined && cabinId !== undefined) break;
             }
           }
         }
-        cabins.push({ label: String(label || ""), count: n[countKey] });
+
+        const labelText = String(label || "");
+        cabins.push({
+          label: labelText,
+          id: cabinId === undefined ? null : cabinId,
+          count: n[countKey],
+          wheelchair: wheelchair || isWheelchairLabel(labelText) || isWheelchairId(cabinId)
+        });
       }
 
       Object.keys(n).forEach((k) => walk(n[k], depth + 1));
@@ -379,24 +434,69 @@
     return Array.from(uniq.values()).sort((a, b) => U.toMinutes(a.time) - U.toMinutes(b.time));
   }
 
-  /** İstenen vagon tipine göre kullanılabilir yer sayısını döndürür. */
-  function countForCabin(train, cabinClass) {
-    if (!cabinClass || cabinClass === "AUTO" || !train.cabins || !train.cabins.length) {
-      return train.emptyCount;
-    }
-    // Etiketsiz (vagon tipi bilgisi olmayan) yanıtlarda filtre uygulanamaz.
-    const labeled = train.cabins.filter((c) => c.label);
-    if (!labeled.length) return train.emptyCount;
-
-    const wanted = U.normalize(cabinClass);
-    const matched = labeled.filter((c) => U.normalize(c.label).includes(wanted));
-    if (!matched.length) return 0;
-    return matched.reduce((acc, c) => acc + (c.count || 0), 0);
+  /** Kullanıcı tekerlekli sandalye koltuklarını özellikle istedi mi? */
+  function wantsWheelchair(s) {
+    return !!(s && (s.includeWheelchair === true || isWheelchairLabel(s.cabinClass)));
   }
 
-  /** Koltuk haritası yanıtından boş koltukları çıkarır. */
-  function extractEmptySeats(json) {
+  /** Tarama yalnızca tekerlekli sandalye sınıfını mı hedefliyor? */
+  function onlyWheelchair(s) {
+    return !!(s && isWheelchairLabel(s.cabinClass));
+  }
+
+  /**
+   * İstenen vagon tipine göre kullanılabilir yer sayısını döndürür.
+   * Tekerlekli sandalye (engelli) kabinleri, kullanıcı özellikle istemedikçe
+   * sayıma DAHİL EDİLMEZ; böylece sadece o koltuklar boşken alarm üretilmez.
+   *
+   * @param {object} opts { cabinClass, includeWheelchair }
+   */
+  function countForCabin(train, opts) {
+    const s = opts || {};
+    const cabins = train.cabins || [];
+    const labeled = cabins.filter((c) => c.label || c.id !== null);
+
+    // Kabin kırılımı yoksa filtre uygulanamaz; ikinci kapı koltuk haritasıdır.
+    if (!labeled.length) {
+      if (!wantsWheelchair(s) && train.emptyCount > 0) {
+        U.warn("Kabin kırılımı yok: tekerlekli sandalye filtresi koltuk haritası adımında uygulanacak.");
+      }
+      return train.emptyCount;
+    }
+
+    let pool = labeled;
+    if (onlyWheelchair(s)) {
+      pool = pool.filter((c) => c.wheelchair);
+    } else {
+      if (!wantsWheelchair(s)) pool = pool.filter((c) => !c.wheelchair);
+      if (s.cabinClass && s.cabinClass !== "AUTO") {
+        const wanted = U.normalize(s.cabinClass);
+        pool = pool.filter((c) => c.label && U.normalize(c.label).includes(wanted));
+      }
+    }
+
+    return pool.reduce((acc, c) => acc + (c.count || 0), 0);
+  }
+
+  /**
+   * Koltuk haritası yanıtından (purchasableSeats / seats / koltuklar ...)
+   * boş koltukları çıkarır.
+   *
+   * Tekerlekli sandalye (engelli) koltukları varsayılan olarak ELENİR:
+   *   - koltuğun kendi tip/açıklama alanı ya da boolean bayrağı,
+   *   - veya bulunduğu vagon/kabin sınıfının adı ya da ID'si
+   * tekerlekli sandalye sınıfına işaret ediyorsa koltuk atlanır.
+   * Kabin bilgisi koltuk düğümünde değil üst düğümde durduğu için, ağaçta
+   * aşağı inerken bağlam (ctx) olarak taşınır.
+   *
+   * @param {object} opts { includeWheelchair, onlyWheelchair }
+   * @returns {{seats: Array, total: number, wheelchairSkipped: number}}
+   */
+  function extractEmptySeats(json, opts) {
+    const o = opts || {};
     const seats = [];
+    let total = 0;
+    let wheelchairSkipped = 0;
 
     (function walk(node, ctx, depth) {
       if (!node || typeof node !== "object" || depth > 12) return;
@@ -406,13 +506,24 @@
         return;
       }
 
-      // Vagon bilgisi koltuğun kendisinde değil, üst düğümde durur;
+      // Vagon / kabin bilgisi koltuğun kendisinde değil, üst düğümde durur;
       // bu yüzden ağaçta aşağı inerken bağlam olarak taşınır.
       const carVal = pick(node, RE.carNo);
       const carIdVal = pick(node, RE.carId);
+      const cabinLabel = pick(node, RE.cabinName);
+      const cabinIdVal = pick(node, RE.cabinId);
+
       const next = {
         wagon: carVal !== undefined && carVal !== null && String(carVal).length <= 12 ? String(carVal) : ctx.wagon,
-        carId: carIdVal !== undefined && carIdVal !== null ? carIdVal : ctx.carId
+        carId: carIdVal !== undefined && carIdVal !== null ? carIdVal : ctx.carId,
+        cabinLabel: typeof cabinLabel === "string" && cabinLabel ? cabinLabel : ctx.cabinLabel,
+        cabinId: cabinIdVal !== undefined && cabinIdVal !== null ? cabinIdVal : ctx.cabinId,
+        // Bir üst kabin tekerlekli sandalye sınıfıysa altındaki tüm koltuklar da öyledir.
+        wheelchair:
+          ctx.wheelchair ||
+          isWheelchairLabel(cabinLabel) ||
+          isWheelchairId(cabinIdVal) ||
+          (!Object.keys(node).some((k) => RE.seatNo.test(k)) && isWheelchairNode(node))
       };
 
       const seatNoRaw = pick(node, RE.seatNo);
@@ -429,25 +540,37 @@
         }
 
         if (isEmpty === true) {
-          seats.push({
-            wagon: next.wagon || "?",
-            seatNo: String(seatNoRaw).toUpperCase(),
-            carId: next.carId ?? null
-          });
+          total++;
+          const isWheelchairSeat = next.wheelchair || isWheelchairNode(node);
+
+          const skip = o.onlyWheelchair ? !isWheelchairSeat : isWheelchairSeat && !o.includeWheelchair;
+          if (skip) {
+            if (isWheelchairSeat) wheelchairSkipped++;
+          } else {
+            seats.push({
+              wagon: next.wagon || "?",
+              seatNo: String(seatNoRaw).toUpperCase(),
+              carId: next.carId ?? null,
+              cabin: next.cabinLabel || "",
+              wheelchair: isWheelchairSeat
+            });
+          }
         }
       }
 
       Object.keys(node).forEach((k) => walk(node[k], next, depth + 1));
-    })(json, { wagon: null, carId: null }, 0);
+    })(json, { wagon: null, carId: null, cabinLabel: null, cabinId: null, wheelchair: false }, 0);
 
     // Tekilleştir
     const seen = new Set();
-    return seats.filter((s) => {
-      const key = s.wagon + "-" + s.seatNo;
+    const unique = seats.filter((x) => {
+      const key = x.wagon + "-" + x.seatNo;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
+
+    return { seats: unique, total, wheelchairSkipped };
   }
 
   /* ====================================================================== */
@@ -601,22 +724,37 @@
       report(
         "info",
         `${trains.length} sefer döndü, ${candidates.length} tanesi saat aralığında. ` +
-          candidates.map((t) => `${t.time}:${countForCabin(t, s.cabinClass)}`).join(" ")
+          candidates.map((t) => `${t.time}:${countForCabin(t, s)}`).join(" ")
       );
 
       const need = Number(s.passengerCount) || 1;
-      const hit = candidates.find((t) => countForCabin(t, s.cabinClass) >= need);
-      if (!hit) return;
+      const hit = candidates.find((t) => countForCabin(t, s) >= need);
+      if (!hit) {
+        // Kabin kırılımında yalnızca tekerlekli sandalye kabini boşsa bunu görünür kıl.
+        const wheelchairOnly = candidates.find(
+          (t) => (t.cabins || []).some((c) => c.wheelchair && c.count > 0) && countForCabin(t, s) < need
+        );
+        if (wheelchairOnly && !wantsWheelchair(s)) {
+          report(
+            "info",
+            `${wheelchairOnly.time} seferinde yalnızca tekerlekli sandalye koltuğu boş; ayarlar gereği yok sayıldı.`
+          );
+        }
+        return;
+      }
 
       /* --- Boş koltuk var: koltuk haritasını çek --- */
       report(
         "ok",
-        `Boş yer sinyali: ${hit.time} seferinde ${countForCabin(hit, s.cabinClass)} yer` +
-          (hit.cabins && hit.cabins.length ? ` (${hit.cabins.map((c) => `${c.label || "?"}:${c.count}`).join(", ")})` : "") +
-          "."
+        `Boş yer sinyali: ${hit.time} seferinde ${countForCabin(hit, s)} yer` +
+          (hit.cabins && hit.cabins.length
+            ? ` (${hit.cabins.map((c) => `${c.label || "?"}${c.wheelchair ? "*" : ""}:${c.count}`).join(", ")})`
+            : "") +
+          (wantsWheelchair(s) ? "" : " [* = tekerlekli sandalye, sayıma dahil değil]")
       );
 
       let seats = [];
+      let seatMapParsed = null;
       try {
         const seatUrl = await endpointUrl(CFG.ENDPOINTS.seatMap);
         const seatBody = await buildSeatMapBody(hit, s);
@@ -628,12 +766,24 @@
         }
         if (seatRes.ok) {
           if (s.debug) U.log("Koltuk haritası (ham):", seatRes.json);
-          seats = extractEmptySeats(seatRes.json);
+          seatMapParsed = extractEmptySeats(seatRes.json, {
+            includeWheelchair: wantsWheelchair(s),
+            onlyWheelchair: onlyWheelchair(s)
+          });
+          seats = seatMapParsed.seats;
+
           if (s.preferredWagon) {
             const filtered = seats.filter((x) => String(x.wagon) === String(s.preferredWagon));
             if (filtered.length) seats = filtered;
           }
-          report("ok", `Koltuk haritası: ${seats.length} boş koltuk bulundu.`);
+          report(
+            "ok",
+            `Koltuk haritası: ${seats.length} uygun koltuk` +
+              (seatMapParsed.wheelchairSkipped
+                ? ` (${seatMapParsed.wheelchairSkipped} tekerlekli sandalye koltuğu elendi)`
+                : "") +
+              "."
+          );
         } else {
           report("warn", `Koltuk haritası alınamadı (HTTP ${seatRes.status}); DOM üzerinden devam edilecek.`);
         }
@@ -641,11 +791,25 @@
         report("warn", "Koltuk haritası hatası: " + e.message);
       }
 
+      /**
+       * İkinci kapı: kabin kırılımı yoksa ya da yanıltıcıysa, koltuk haritası
+       * kararı verir. Boş görünen koltukların TAMAMI tekerlekli sandalye
+       * koltuğuysa alarm üretmeden taramaya devam edilir.
+       */
+      if (seatMapParsed && seatMapParsed.total > 0 && !seats.length && seatMapParsed.wheelchairSkipped > 0) {
+        report(
+          "info",
+          `${hit.time} seferinde boş koltukların tamamı tekerlekli sandalye koltuğu ` +
+            `(${seatMapParsed.wheelchairSkipped} adet); ayarlar gereği yok sayıldı, tarama sürüyor.`
+        );
+        return;
+      }
+
       const result = {
         trainId: hit.id,
         trainLabel: `${hit.time} ${hit.name || ""}`.trim(),
         time: hit.time,
-        emptyCount: countForCabin(hit, s.cabinClass),
+        emptyCount: countForCabin(hit, s),
         seats: seats.slice(0, 20)
       };
 
@@ -716,8 +880,28 @@
     return matches[0] || null;
   }
 
-  /** Koltuk haritasında istenen koltuğu bulur. */
-  function findSeatElement(seatNo) {
+  /** Bir koltuk elemanının sınıf/etiket bilgisini toplar. */
+  function seatElementSignature(cell) {
+    const cls = String(
+      cell.className && cell.className.baseVal !== undefined ? cell.className.baseVal : cell.className || ""
+    );
+    return [cls, cell.getAttribute("aria-label") || "", cell.getAttribute("title") || "", cell.id || ""].join(" ");
+  }
+
+  /**
+   * DOM'daki koltuk tekerlekli sandalye koltuğu mu?
+   * API filtresi kaçırırsa diye son kontrol noktasıdır.
+   */
+  function isWheelchairSeatElement(cell) {
+    const sig = seatElementSignature(cell);
+    return CFG.SELECTORS.wheelchairSeatMarkers.some((m) => new RegExp(m, "i").test(sig));
+  }
+
+  /**
+   * Koltuk haritasında istenen koltuğu bulur.
+   * @param {boolean} allowWheelchair Tekerlekli sandalye koltuğuna tıklanabilir mi?
+   */
+  function findSeatElement(seatNo, allowWheelchair) {
     const cells = U.queryAllCandidates(CFG.SELECTORS.seatCell).filter(U.isVisible);
     const target = String(seatNo).toUpperCase();
 
@@ -735,6 +919,11 @@
       const occupied = CFG.SELECTORS.occupiedSeatMarkers.some((m) => new RegExp(m, "i").test(cls));
       if (occupied || U.isDisabled(cell)) continue;
 
+      if (!allowWheelchair && isWheelchairSeatElement(cell)) {
+        U.log(`Koltuk ${no} tekerlekli sandalye koltuğu olarak işaretli, atlandı.`);
+        continue;
+      }
+
       return cell;
     }
     return null;
@@ -749,8 +938,14 @@
     if (state.automationRunning) return;
     state.automationRunning = true;
 
+    const allowWheelchair = wantsWheelchair(s);
+
     try {
-      report("info", "DOM otomasyonu başlıyor...");
+      report(
+        "info",
+        "DOM otomasyonu başlıyor..." +
+          (allowWheelchair ? " (tekerlekli sandalye koltukları dahil)" : " (tekerlekli sandalye koltukları hariç)")
+      );
 
       /* --- 1) Hedef sefer satırı --- */
       const row = await U.waitFor(() => findTrainRow(result.time), {
@@ -820,7 +1015,7 @@
 
         // Koltuk
         try {
-          const seatEl = await U.waitFor(() => findSeatElement(seat.seatNo), {
+          const seatEl = await U.waitFor(() => findSeatElement(seat.seatNo, allowWheelchair), {
             timeout: CFG.WAIT.short,
             label: `koltuk ${seat.seatNo}`
           });
@@ -838,7 +1033,12 @@
           .filter(U.isVisible)
           .find((el) => {
             const cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || "");
-            return !CFG.SELECTORS.occupiedSeatMarkers.some((m) => new RegExp(m, "i").test(cls)) && !U.isDisabled(el) && U.extractSeatNo(U.textOf(el) || el.id);
+            if (CFG.SELECTORS.occupiedSeatMarkers.some((m) => new RegExp(m, "i").test(cls))) return false;
+            if (U.isDisabled(el)) return false;
+            // Yedek seçimde de tekerlekli sandalye koltuğuna tıklanmaz.
+            if (!allowWheelchair && isWheelchairSeatElement(el)) return false;
+            if (allowWheelchair && onlyWheelchair(s) && !isWheelchairSeatElement(el)) return false;
+            return !!U.extractSeatNo(U.textOf(el) || el.id);
           });
         if (firstFree) {
           await U.clickReal(firstFree, "haritadaki ilk boş koltuk");
@@ -914,6 +1114,11 @@
     extractCabins,
     countForCabin,
     extractEmptySeats,
+    isWheelchairLabel,
+    isWheelchairId,
+    isWheelchairNode,
+    isWheelchairSeatElement,
+    wantsWheelchair,
     findTrainRow,
     findSeatElement,
     buildSearchBody,

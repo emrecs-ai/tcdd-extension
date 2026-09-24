@@ -140,12 +140,124 @@ const seatMap = {
     }
   ]
 };
-const seats = D.extractEmptySeats(seatMap);
+const seats = D.extractEmptySeats(seatMap).seats;
 check("boş koltuklar bulundu", seats.length === 3, seats);
 check("vagon id'si üst düğümden taşındı", seats.every((s) => s.carId === 11 || s.carId === 12), seats);
 check("vagon bilgisi taşınıyor", seats.every((s) => s.wagon === "1" || s.wagon === "2"), seats);
 check("dolu koltuk elenmiş", !seats.some((s) => s.seatNo === "1A" || s.seatNo === "2A" || s.seatNo === "5C"));
 check("tekrar eden koltuk tekilleşti", seats.filter((s) => s.seatNo === "5D").length === 1);
+
+/* ---- Örnek 3c: tekerlekli sandalye (engelli) koltuk filtresi ---- */
+
+// Kabin seviyesi: standart sınıflar dolu, yalnızca tekerlekli sandalye boş.
+const wheelchairOnlyTrain = D.extractTrains({
+  trains: [
+    {
+      id: 7001,
+      commercialName: "YHT 90",
+      departureTime: "2026-09-25T10:00:00",
+      cabinClassAvailabilities: [
+        { cabinClass: { id: 1, name: "EKONOMİ" }, availabilityCount: 0 },
+        { cabinClass: { id: 2, name: "BUSINESS" }, availabilityCount: 0 },
+        { cabinClass: { id: 9, name: "TEKERLEKLİ SANDALYE" }, availabilityCount: 2 }
+      ]
+    }
+  ]
+})[0];
+
+check("tekerlekli sandalye kabini işaretlendi", wheelchairOnlyTrain.cabins.some((c) => c.wheelchair), wheelchairOnlyTrain.cabins);
+check("kabin id'si okundu", wheelchairOnlyTrain.cabins.map((c) => c.id).join(",") === "1,2,9", wheelchairOnlyTrain.cabins.map((c) => c.id));
+check(
+  "varsayılanda tekerlekli sandalye sayılmıyor",
+  D.countForCabin(wheelchairOnlyTrain, { cabinClass: "AUTO" }) === 0,
+  D.countForCabin(wheelchairOnlyTrain, { cabinClass: "AUTO" })
+);
+check(
+  "kullanıcı isterse sayılıyor",
+  D.countForCabin(wheelchairOnlyTrain, { cabinClass: "AUTO", includeWheelchair: true }) === 2
+);
+check(
+  "sınıf olarak seçilirse sadece o sayılıyor",
+  D.countForCabin(wheelchairOnlyTrain, { cabinClass: "Tekerlekli Sandalye" }) === 2
+);
+check(
+  "ekonomi istenince tekerlekli sandalye sızmıyor",
+  D.countForCabin(wheelchairOnlyTrain, { cabinClass: "Ekonomi" }) === 0
+);
+
+// Sınıf adı bilinmese bile yapılandırmadaki ID ile eşleşmeli.
+sandbox.TCDD_CONFIG.WHEELCHAIR.classIds = [4242];
+const byIdTrain = D.extractTrains({
+  trains: [
+    {
+      id: 7002,
+      departureTime: "2026-09-25T11:00:00",
+      cabinClassAvailabilities: [{ cabinClass: { id: 4242, name: "BELİRSİZ SINIF" }, availabilityCount: 5 }]
+    }
+  ]
+})[0];
+check("sınıf ID'si ile tespit", byIdTrain.cabins[0].wheelchair === true, byIdTrain.cabins[0]);
+check("ID ile eşleşen kabin sayılmıyor", D.countForCabin(byIdTrain, { cabinClass: "AUTO" }) === 0);
+sandbox.TCDD_CONFIG.WHEELCHAIR.classIds = [];
+
+// Koltuk seviyesi: purchasableSeats içinde hem normal hem engelli koltuk.
+const seatMapWheelchair = {
+  trainCars: [
+    {
+      trainCarId: 21,
+      carName: "3",
+      cabinClassName: "EKONOMİ",
+      purchasableSeats: [
+        { seatNumber: "10A", status: "OCCUPIED" },
+        { seatNumber: "10B", status: "AVAILABLE", seatType: "Pencere kenarı" }
+      ]
+    },
+    {
+      trainCarId: 22,
+      carName: "4",
+      cabinClassName: "TEKERLEKLİ SANDALYE",
+      purchasableSeats: [
+        { seatNumber: "1C", status: "AVAILABLE" },
+        { seatNumber: "1D", status: "AVAILABLE" }
+      ]
+    },
+    {
+      trainCarId: 23,
+      carName: "5",
+      cabinClassName: "EKONOMİ",
+      purchasableSeats: [
+        { seatNumber: "7A", status: "AVAILABLE", isWheelchairSeat: true },
+        { seatNumber: "7B", status: "AVAILABLE", seatDescription: "Engelli koltuğu" }
+      ]
+    }
+  ]
+};
+
+const def = D.extractEmptySeats(seatMapWheelchair, {});
+check("varsayılanda sadece normal koltuk", def.seats.map((x) => x.seatNo).join(",") === "10B", def.seats);
+check("elenen engelli koltuğu sayısı", def.wheelchairSkipped === 4, def.wheelchairSkipped);
+check("toplam boş koltuk sayısı", def.total === 5, def.total);
+
+const inc = D.extractEmptySeats(seatMapWheelchair, { includeWheelchair: true });
+check("dahil edilince hepsi geliyor", inc.seats.length === 5, inc.seats.map((x) => x.seatNo));
+check("vagon sınıfı koltuğa taşındı", inc.seats.find((x) => x.seatNo === "1C").cabin === "TEKERLEKLİ SANDALYE");
+
+const only = D.extractEmptySeats(seatMapWheelchair, { includeWheelchair: true, onlyWheelchair: true });
+check("yalnızca engelli koltukları", only.seats.map((x) => x.seatNo).sort().join(",") === "1C,1D,7A,7B", only.seats.map((x) => x.seatNo));
+
+// Tümü engelli koltuğu olan harita: tarama alarm vermemeli (seats boş, skipped > 0).
+const allWheelchair = D.extractEmptySeats(
+  { cars: [{ carName: "1", cabinClassName: "Tekerlekli Sandalye", seats: [{ seatNumber: "2A", status: "AVAILABLE" }] }] },
+  {}
+);
+check("tamamı engelli koltuğuysa boş dönüyor", allWheelchair.seats.length === 0 && allWheelchair.wheelchairSkipped === 1, allWheelchair);
+
+// "disabled" alanı tek başına engelli koltuğu anlamına gelmemeli.
+check("çok anlamlı 'disabled' bayrağı tetiklemiyor", D.isWheelchairNode({ seatNumber: "3A", disabled: true }) === false);
+check("isWheelchairLabel Türkçe", D.isWheelchairLabel("Tekerlekli Sandalye") && D.isWheelchairLabel("ENGELLİ"));
+check("isWheelchairLabel normal sınıf", !D.isWheelchairLabel("Ekonomi") && !D.isWheelchairLabel("Business"));
+check("wantsWheelchair sınıf seçiminden", D.wantsWheelchair({ cabinClass: "Tekerlekli Sandalye" }) === true);
+check("wantsWheelchair varsayılan", D.wantsWheelchair({ cabinClass: "AUTO" }) === false);
 
 /* ---- Örnek 3b: saf yardımcı fonksiyonlar ---- */
 const DU = sandbox.TCDD_DOM;

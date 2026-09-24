@@ -33,6 +33,8 @@
     intervalSec: $("intervalSec"),
     preferredWagon: $("preferredWagon"),
     autoSelect: $("autoSelect"),
+    includeWheelchair: $("includeWheelchair"),
+    wheelchairHint: $("wheelchairHint"),
     debug: $("debug"),
     btnStart: $("btnStart"),
     btnStop: $("btnStop"),
@@ -95,6 +97,8 @@
       intervalSec: Number(els.intervalSec.value) || CFG.DEFAULTS.intervalSec,
       preferredWagon: els.preferredWagon.value ? Number(els.preferredWagon.value) : null,
       autoSelect: els.autoSelect.checked,
+      // Tekerlekli sandalye sınıfı özellikle seçilmişse dahil etme zaten zorunludur.
+      includeWheelchair: els.includeWheelchair.checked || isWheelchairClass(els.cabinClass.value),
       debug: els.debug.checked
     };
   }
@@ -114,7 +118,32 @@
     if (s.intervalSec) els.intervalSec.value = s.intervalSec;
     if (s.preferredWagon) els.preferredWagon.value = s.preferredWagon;
     if (typeof s.autoSelect === "boolean") els.autoSelect.checked = s.autoSelect;
+    if (typeof s.includeWheelchair === "boolean") els.includeWheelchair.checked = s.includeWheelchair;
     if (typeof s.debug === "boolean") els.debug.checked = s.debug;
+  }
+
+  /** Seçilen vagon tipi tekerlekli sandalye sınıfı mı? */
+  function isWheelchairClass(value) {
+    const norm = String(value || "").toLocaleLowerCase("tr-TR");
+    return CFG.WHEELCHAIR.namePatterns.some((patt) => norm.includes(String(patt).toLocaleLowerCase("tr-TR")));
+  }
+
+  /**
+   * Vagon tipi olarak "Tekerlekli Sandalye" seçildiyse dahil etme kutusu
+   * zorunlu olarak işaretlenir ve kilitlenir (aksi halde tarama boş dönerdi).
+   */
+  function syncWheelchairUi() {
+    const forced = isWheelchairClass(els.cabinClass.value);
+    els.includeWheelchair.disabled = forced;
+    if (forced) els.includeWheelchair.checked = true;
+
+    const on = forced || els.includeWheelchair.checked;
+    els.wheelchairHint.classList.toggle("on", on);
+    els.wheelchairHint.textContent = forced
+      ? "Vagon tipi olarak bu sınıf seçildiği için tarama yalnızca tekerlekli sandalye koltuklarını hedefliyor."
+      : on
+      ? "Tekerlekli sandalye koltukları da taramaya dahil edilecek."
+      : "Varsayılan olarak bu koltuklar yok sayılır; yalnızca onlar boşken alarm verilmez ve otomatik seçim başlatılmaz.";
   }
 
   function validate(s) {
@@ -324,6 +353,8 @@
     els.log.innerHTML = "";
   });
 
+  els.cabinClass.addEventListener("change", syncWheelchairUi);
+  els.includeWheelchair.addEventListener("change", syncWheelchairUi);
   els.fromName.addEventListener("change", () => autofillId(els.fromName, els.fromId));
   els.toName.addEventListener("change", () => autofillId(els.toName, els.toId));
 
@@ -357,6 +388,7 @@
     els.date.min = todayISO();
     els.date.value = todayISO();
     writeForm(data[KEYS.settings]);
+    syncWheelchairUi();
     renderStations(data[KEYS.stations]);
     await refresh();
   })();

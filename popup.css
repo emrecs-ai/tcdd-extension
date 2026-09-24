@@ -224,6 +224,26 @@ select:focus {
 
 /* ---------------- Buttons ---------------- */
 
+.switch-block {
+  margin: 2px 0 4px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.switch-block input {
+  flex: 0 0 auto;
+}
+
+.hint-inline {
+  margin: 0 0 10px 22px;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.hint-inline.on {
+  color: var(--accent);
+}
+
 .btn {
   border: 1px solid transparent;
   border-radius: 8px;

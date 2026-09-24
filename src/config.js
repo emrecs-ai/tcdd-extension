@@ -83,6 +83,46 @@
       STATE_CHANGED: "STATE_CHANGED"
     },
 
+    /**
+     * TEKERLEKLİ SANDALYE / ENGELLİ KOLTUKLARI
+     * -------------------------------------------------------------------------
+     * Standart sınıflar dolu olsa bile bu koltuklar boş kalabildiği için
+     * varsayılan olarak TAMAMEN yok sayılır: ne alarm üretirler ne de otomasyonu
+     * başlatırlar. Yalnızca kullanıcı popup'tan "Tekerlekli sandalye koltuklarını
+     * dahil et" kutusunu işaretlerse (veya vagon tipi olarak bu sınıfı seçerse)
+     * taramaya dahil edilirler.
+     *
+     * Eşleştirme üç kanaldan yapılır:
+     *   1) Sınıf/koltuk adı  -> namePatterns
+     *   2) Sınıf ID'si       -> classIds  (TCDD tarafında ID değişirse buraya ekleyin)
+     *   3) Boolean bayraklar -> flagKeys  (ör. { isWheelchair: true })
+     */
+    WHEELCHAIR: {
+      /** Karşılaştırma normalize edilmiş metin üzerinden yapılır (bkz. dom-utils.normalize). */
+      namePatterns: [
+        "tekerlekli sandalye",
+        "tekerlekli",
+        "engelli",
+        "ozurlu",
+        "wheelchair",
+        "handicap",
+        "handicapped",
+        "disabled",
+        "accessible",
+        "ozel ihtiyac"
+      ],
+      /**
+       * Bilinen sınıf ID'leri. TCDD, tekerlekli sandalye sınıfına ayrı bir
+       * cabinClassId verdiğinde buraya eklemek, ad değişse bile filtrenin
+       * çalışmasını sağlar. Debug modunda ham yanıttan okunabilir.
+       */
+      classIds: [],
+      /** Sadece boolean bayrak anahtarları; "disabled" gibi çok anlamlı alanlar bilinçli olarak yok. */
+      flagKeys: /(wheelchair|engelli|ozurlu|özürlü|handicap|tekerlekli|accessib)/i,
+      /** popup'taki vagon tipi seçeneğinin etiketi. */
+      optionLabel: "Tekerlekli Sandalye"
+    },
+
     /** Varsayılan tarama parametreleri. */
     DEFAULTS: {
       intervalSec: 20,        // taramalar arası bekleme
@@ -172,6 +212,9 @@
       ],
       // Dolu koltuk işareti (class içinde geçen ifadeler)
       occupiedSeatMarkers: ["dolu", "occupied", "reserved", "disabled", "taken", "sold"],
+      // Tekerlekli sandalye koltuğu işareti (class / aria-label / title içinde aranır).
+      // Kullanıcı özellikle istemedikçe bu koltuklara tıklanmaz.
+      wheelchairSeatMarkers: ["engelli", "tekerlekli", "wheelchair", "handicap", "accessible"],
       // Cinsiyet seçim ekranındaki butonlar
       genderButton: {
         css: ["button", "label", "[class*='cinsiyet']", "[class*='gender']"],
