@@ -208,6 +208,45 @@ select:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.genders-field {
+  margin-bottom: 8px;
+}
+
+.genders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gender-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+}
+
+.gender-item > span {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.gender-item select {
+  width: auto;
+  min-width: 74px;
+  border: none;
+  background: transparent;
+  padding: 4px 2px;
+  font-size: 12px;
+}
+
+.gender-item select:focus {
+  box-shadow: none;
+}
+
 .switches {
   justify-content: flex-end;
   gap: 5px;

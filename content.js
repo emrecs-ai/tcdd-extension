@@ -1120,6 +1120,107 @@
   }
 
   /**
+   * Yolcu başına cinsiyet listesi. Eksikse son değerle tamamlanır; eski
+   * sürümlerden gelen tek "gender" alanı da desteklenir.
+   */
+  function passengerGenders(s, need) {
+    const list =
+      Array.isArray(s.genders) && s.genders.length ? s.genders.slice() : [s.gender || "E"];
+    while (list.length < need) list.push(list[list.length - 1] || "E");
+    return list.slice(0, need);
+  }
+
+  /**
+   * Yolcu sayısı kadar koltuğu seçerken vagon değiştirmeyi en aza indirir:
+   * hepsini barındıran bir vagon varsa o vagondaki koltuklar tercih edilir.
+   */
+  function pickSeatsForPassengers(seats, need, preferredWagon) {
+    const list = (seats || []).filter((x) => x && x.seatNo);
+    if (!list.length) return [];
+
+    const byWagon = new Map();
+    for (const seat of list) {
+      const key = String(seat.wagon || "?");
+      if (!byWagon.has(key)) byWagon.set(key, []);
+      byWagon.get(key).push(seat);
+    }
+
+    // Kullanıcının tercih ettiği vagon yeterliyse önce o denenir.
+    if (preferredWagon) {
+      const pref = byWagon.get(String(preferredWagon));
+      if (pref && pref.length >= need) return pref.slice(0, need).concat(list);
+    }
+
+    for (const group of byWagon.values()) {
+      if (group.length >= need) return group.slice(0, need).concat(list);
+    }
+    return list; // tek vagonda yetmiyor: sırayla dene
+  }
+
+  /** İlgili vagon sekmesine geçer (zaten açıksa bir şey yapmaz). */
+  async function ensureWagonTab(wagon) {
+    if (!wagon || wagon === "?") return false;
+    const wantedNo = String(wagon).match(/\d+/);
+    if (!wantedNo) return false;
+
+    const tab = U.queryAllCandidates(CFG.SELECTORS.wagonTab)
+      .filter(U.isVisible)
+      .find((el) => {
+        const no = (U.textOf(el).match(/\d+/) || [])[0];
+        return no && no === wantedNo[0];
+      });
+
+    if (!tab) {
+      report("warn", `Vagon sekmesi bulunamadı: ${wagon}`);
+      return false;
+    }
+    await U.clickReal(tab, `${wagon}. vagon sekmesi`);
+    await U.sleep(900);
+    return true;
+  }
+
+  /**
+   * Koltuk tıklandıktan sonra açılan Bay/Bayan adımını o yolcunun cinsiyetiyle
+   * tamamlar. Ekran açılmadıysa (bazı akışlarda cinsiyet sorulmaz) sessizce geçer.
+   */
+  async function chooseGenderFor(code, label) {
+    const texts = CFG.SELECTORS.genderButton.text[code] || CFG.SELECTORS.genderButton.text.E;
+    try {
+      const el = await U.waitForText(
+        { css: CFG.SELECTORS.genderButton.css, text: texts },
+        { timeout: CFG.WAIT.short, label: `cinsiyet ${texts[0]} (${label})` }
+      );
+      await U.clickReal(el, `cinsiyet ${texts[0]} (${label})`);
+
+      const confirm = U.findByText(CFG.SELECTORS.genderConfirmButton);
+      if (confirm) await U.clickReal(confirm, "cinsiyet onay");
+      return true;
+    } catch (e) {
+      report("warn", `${label}: cinsiyet seçimi yapılamadı (ekran çıkmamış olabilir).`);
+      return false;
+    }
+  }
+
+  /** Haritadaki ilk uygun boş koltuk (API listesi yetmediğinde yedek yol). */
+  function findFreeSeatElement(allowWheelchair, s, usedEls) {
+    return (
+      U.queryAllCandidates(CFG.SELECTORS.seatCell)
+        .filter(U.isVisible)
+        .find((el) => {
+          if (usedEls.has(el)) return false;
+          const cls = String(
+            el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || ""
+          );
+          if (CFG.SELECTORS.occupiedSeatMarkers.some((m) => new RegExp(m, "i").test(cls))) return false;
+          if (U.isDisabled(el)) return false;
+          if (!allowWheelchair && isWheelchairSeatElement(el)) return false;
+          if (allowWheelchair && onlyWheelchair(s) && !isWheelchairSeatElement(el)) return false;
+          return !!U.extractSeatNo(U.textOf(el) || el.id);
+        }) || null
+    );
+  }
+
+  /**
    * Bulunan koltuk için sayfa üzerindeki adımları otomatik yürütür.
    * Hiçbir aşamada bilet satın alma / ödeme yapılmaz; işlem cinsiyet
    * seçiminden sonra kullanıcıya devredilir.
@@ -1180,81 +1281,64 @@
       }).catch((e) => report("warn", "Koltuk haritası konteyneri doğrulanamadı: " + e.message));
       await U.sleep(600);
 
-      /* --- 6) İlgili vagon sekmesi + koltuk --- */
-      const wanted = (result.seats && result.seats.length ? result.seats : [{ wagon: s.preferredWagon || "", seatNo: null }]);
-      let selectedSeat = null;
+      /* --- 6) Yolcu sayısı kadar koltuk + her koltuk için kendi cinsiyeti --- */
+      const need = Math.max(1, Number(s.passengerCount) || 1);
+      const genders = passengerGenders(s, need);
+      report("info", `${need} yolcu için koltuk seçilecek. Cinsiyetler: ${genders.join(", ")}`);
 
-      for (const seat of wanted) {
-        // Vagon sekmesi
-        if (seat.wagon && seat.wagon !== "?") {
-          const tab = U.queryAllCandidates(CFG.SELECTORS.wagonTab)
-            .filter(U.isVisible)
-            .find((el) => {
-              const no = (U.textOf(el).match(/\d+/) || [])[0];
-              return no && String(no) === String(seat.wagon).match(/\d+/)?.[0];
-            });
-          if (tab) {
-            await U.clickReal(tab, `${seat.wagon}. vagon sekmesi`);
-            await U.sleep(900);
-          } else {
-            report("warn", `Vagon sekmesi bulunamadı: ${seat.wagon}`);
-          }
+      const plan = pickSeatsForPassengers(result.seats, need, s.preferredWagon);
+      const selected = [];
+      const usedEls = new Set();
+      let lastWagon = null;
+
+      for (const seat of plan) {
+        if (selected.length >= need) break;
+        if (selected.some((x) => x.wagon === seat.wagon && x.seatNo === seat.seatNo)) continue;
+
+        if (seat.wagon && seat.wagon !== lastWagon) {
+          await ensureWagonTab(seat.wagon);
+          lastWagon = seat.wagon;
         }
 
-        if (!seat.seatNo) break;
-
-        // Koltuk
         try {
           const seatEl = await U.waitFor(() => findSeatElement(seat.seatNo, allowWheelchair), {
             timeout: CFG.WAIT.short,
             label: `koltuk ${seat.seatNo}`
           });
-          await U.clickReal(seatEl, `koltuk ${seat.wagon}/${seat.seatNo}`);
-          selectedSeat = seat;
-          break;
+          const passengerNo = selected.length + 1;
+          await U.clickReal(seatEl, `koltuk ${seat.wagon}/${seat.seatNo} (yolcu ${passengerNo})`);
+          usedEls.add(seatEl);
+
+          // TCDD koltuk seçiminden hemen sonra o koltuk için Bay/Bayan sorar.
+          await chooseGenderFor(genders[passengerNo - 1], `yolcu ${passengerNo}`);
+          selected.push(seat);
         } catch (e) {
           report("warn", `Koltuk ${seat.wagon}/${seat.seatNo} tıklanamadı, sıradaki deneniyor.`);
         }
       }
 
-      if (!selectedSeat) {
-        // API'den koltuk gelmediyse haritadaki ilk boş koltuğu dene.
-        const firstFree = U.queryAllCandidates(CFG.SELECTORS.seatCell)
-          .filter(U.isVisible)
-          .find((el) => {
-            const cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || "");
-            if (CFG.SELECTORS.occupiedSeatMarkers.some((m) => new RegExp(m, "i").test(cls))) return false;
-            if (U.isDisabled(el)) return false;
-            // Yedek seçimde de tekerlekli sandalye koltuğuna tıklanmaz.
-            if (!allowWheelchair && isWheelchairSeatElement(el)) return false;
-            if (allowWheelchair && onlyWheelchair(s) && !isWheelchairSeatElement(el)) return false;
-            return !!U.extractSeatNo(U.textOf(el) || el.id);
-          });
-        if (firstFree) {
-          await U.clickReal(firstFree, "haritadaki ilk boş koltuk");
-          selectedSeat = { wagon: "?", seatNo: U.extractSeatNo(U.textOf(firstFree) || firstFree.id) || "?" };
-        }
+      /* --- 7) API listesi yetmediyse haritadaki boş koltuklarla tamamla --- */
+      while (selected.length < need) {
+        const el = findFreeSeatElement(allowWheelchair, s, usedEls);
+        if (!el) break;
+
+        const passengerNo = selected.length + 1;
+        const seatNo = U.extractSeatNo(U.textOf(el) || el.id) || "?";
+        await U.clickReal(el, `haritadan boş koltuk ${seatNo} (yolcu ${passengerNo})`);
+        usedEls.add(el);
+
+        await chooseGenderFor(genders[passengerNo - 1], `yolcu ${passengerNo}`);
+        selected.push({ wagon: lastWagon || "?", seatNo });
       }
 
-      if (!selectedSeat) throw new Error("Uygun koltuk elemanı sayfada bulunamadı.");
-
-      /* --- 7) Cinsiyet seçimi --- */
-      const genderTexts = CFG.SELECTORS.genderButton.text[s.gender] || CFG.SELECTORS.genderButton.text.E;
-      try {
-        const genderEl = await U.waitForText(
-          { css: CFG.SELECTORS.genderButton.css, text: genderTexts },
-          { timeout: CFG.WAIT.short, label: `cinsiyet (${genderTexts[0]})` }
-        );
-        await U.clickReal(genderEl, "cinsiyet");
-
-        const confirm = U.findByText(CFG.SELECTORS.genderConfirmButton);
-        if (confirm) await U.clickReal(confirm, "cinsiyet onay");
-      } catch (e) {
-        report("warn", "Cinsiyet seçimi yapılamadı (ekran çıkmamış olabilir): " + e.message);
+      if (!selected.length) throw new Error("Uygun koltuk elemanı sayfada bulunamadı.");
+      if (selected.length < need) {
+        report("warn", `${need} yolcu isteniyordu, ${selected.length} koltuk seçilebildi. Kalanını manuel tamamlayın.`);
       }
 
       /* --- 8) Dur ve kullanıcıya bırak --- */
-      const detail = `${result.trainLabel} | ${selectedSeat.wagon}. vagon / ${selectedSeat.seatNo} nolu koltuk seçildi.`;
+      const seatList = selected.map((x, i) => `${x.wagon}/${x.seatNo} (${genders[i]})`).join(", ");
+      const detail = `${result.trainLabel} | ${selected.length}/${need} koltuk seçildi: ${seatList}`;
       report("ok", "Otomasyon tamamlandı. " + detail);
       await send(MSG.TICKET_SELECTED, { detail });
     } catch (e) {
@@ -1309,6 +1393,8 @@
     isWheelchairNode,
     isWheelchairSeatElement,
     wantsWheelchair,
+    passengerGenders,
+    pickSeatsForPassengers,
     findTrainRow,
     findSeatElement,
     buildSearchBody,

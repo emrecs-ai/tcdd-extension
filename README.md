@@ -50,12 +50,33 @@ popup  ──START──▶  background ──CONTENT_START──▶  content.js
    yeşile döndüğünde hazırsınız.
 3. Eklenti popup'ını açın, **"↺ Son manuel aramadan doldur"** butonuna basın — kalkış/varış
    istasyonları ve ID'leri yaptığınız aramadan otomatik doldurulur.
-4. Tarih, sefer saatleri, yolcu sayısı, cinsiyet ve vagon tipini seçip **Taramayı Başlat**'a basın.
+4. Tarih, sefer saatleri, yolcu sayısı, **her yolcunun cinsiyeti** ve vagon tipini seçip
+   **Taramayı Başlat**'a basın.
    Tekerlekli sandalye koltukları varsayılan olarak yok sayılır (bkz. aşağıdaki bölüm).
 5. TCDD sekmesini **açık bırakın**. Tarama o sekmede çalışır.
 
 Koltuk bulunduğunda: bildirim gelir → tarama durur → DOM otomasyonu koltuğu seçer →
 "Bilet Seçildi, Ödeme Yapın" bildirimi gelir.
+
+### Birden fazla yolcu
+
+Yolcu sayısını artırdığınızda arayüzde her yolcu için ayrı bir cinsiyet seçici çıkar
+(`1. Bay`, `2. Bayan`, …). TCDD koltuk seçiminde Bay/Bayan bilgisini **koltuk başına** sorduğu
+için otomasyon da şu döngüyü kurar:
+
+```
+koltuk 1'e tıkla -> 1. yolcunun cinsiyetini seç
+koltuk 2'ye tıkla -> 2. yolcunun cinsiyetini seç
+...
+```
+
+- Koltuklar mümkünse **aynı vagondan** seçilir (vagon değiştirmeyi en aza indirir); tek vagon
+  yetmezse listedeki sırayla devam edilir.
+- API'den gelen koltuk listesi yetmezse haritadaki uygun boş koltuklarla tamamlanır.
+- Yolcu sayısı kadar koltuk bulunamazsa kaç koltuk seçildiği log'a ve bildirime yazılır,
+  kalanını siz tamamlarsınız.
+- Yolcu sayısı azaltılıp artırıldığında mevcut cinsiyet seçimleri korunur; yeni yolcular
+  son seçimi devralır.
 
 ### Uç nokta (API adresi) neden yakalanmalı?
 
@@ -85,11 +106,13 @@ seçilmezse tüm seferler taranır.
 
 - Sabit tarifeler: `src/config.js` → `KNOWN_TIMETABLES`, anahtar `"<kalkışID>-<varışID>"`.
   Hazır gelen: `1325-98` (İstanbul Söğütlüçeşme → Ankara Gar, 15 sefer).
-- **Öğrenme:** her başarılı taramada dönen gerçek kalkış saatleri güzergâh bazında kaydedilir;
+- **Öğrenme:** her taramada dönen kalkış saatleri güzergâh bazında **değiştirilerek** kaydedilir
+  (birikmez). Birleştirme, ayrıştırma mantığı değiştiğinde eski/yanlış okunmuş saatlerin
+  (ör. saat dilimi düzeltmesinden önceki UTC değerlerinin) listede kalıcılaşmasına yol açıyordu;
+  ayrıca eklenti her güncellendiğinde öğrenilen saatler sıfırlanır. Öğrenilen saatler yalnızca
+  **sabit tarifesi olmayan** güzergâhlarda gösterilir;
   tanımlı tarifesi olmayan güzergâhlarda (ör. ters yön) liste bir taramadan sonra kendiliğinden
   oluşur. Tarifesi hiç bilinmeyen güzergâhta arayüz saat aralığına düşer.
-- API, tarifeden **farklı** saatler döndürüyorsa bunlar listeye **kesik çerçeveli** çip olarak
-  eklenir ve doğrudan seçilebilir.
 
 #### Saat eşleşmiyorsa ("0 tanesi hedef saatlerde")
 

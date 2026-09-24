@@ -98,17 +98,16 @@
           <input type="number" id="passengerCount" min="1" max="6" value="1" required />
         </label>
         <label class="field">
-          <span>Cinsiyet</span>
-          <select id="gender">
-            <option value="E">Bay</option>
-            <option value="K">Bayan</option>
-          </select>
-        </label>
-        <label class="field">
           <span>Vagon tipi</span>
           <!-- Seçenekler src/config.js -> CABIN_CLASSES üzerinden doldurulur -->
           <select id="cabinClass"></select>
         </label>
+      </div>
+
+      <!-- Her yolcu için ayrı cinsiyet: TCDD koltuk seçiminde koltuk başına sorar -->
+      <div class="field genders-field">
+        <span>Yolcu cinsiyetleri</span>
+        <div class="genders" id="genders"></div>
       </div>
 
       <div class="row">

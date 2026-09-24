@@ -482,13 +482,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         case MSG.CAPTURED_TIMETABLE: {
-          // Taramada dönen gerçek kalkış saatleri güzergâh bazında biriktirilir.
+          /**
+           * Güzergâhın kalkış saatleri, SON taramanın sonucuyla değiştirilir
+           * (birleştirilmez). Birleştirme, ayrıştırma mantığı değiştiğinde eski
+           * ve yanlış okunmuş saatlerin (ör. saat dilimi düzeltmesinden önceki
+           * UTC değerleri) listede kalıcı olarak birikmesine yol açıyordu.
+           */
           const all = await getStore(KEYS.timetables, {});
-          const prev = all[msg.routeKey] || { times: [] };
-          const merged = Array.from(new Set(prev.times.concat(msg.times || []))).sort();
-          all[msg.routeKey] = { label: msg.label || prev.label || "", times: merged.slice(0, 40), at: Date.now() };
+          const times = Array.from(new Set(msg.times || [])).sort();
+          all[msg.routeKey] = { label: msg.label || "", times: times.slice(0, 40), at: Date.now() };
           await setStore(KEYS.timetables, all);
-          sendResponse({ ok: true, count: merged.length });
+          sendResponse({ ok: true, count: times.length });
           break;
         }
 
@@ -568,8 +572,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 /* Kurulum                                                                    */
 /* ========================================================================== */
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   await setState(DEFAULT_STATE);
+
+  if (details && details.reason === "update") {
+    // Ayrıştırma mantığı sürümler arasında değişebildiği için öğrenilen
+    // saatler güncellemede sıfırlanır; ilk taramada yeniden doldurulur.
+    await setStore(KEYS.timetables, {});
+    await appendLog("info", "Eklenti güncellendi. Öğrenilen sefer saatleri sıfırlandı.");
+    return;
+  }
+
   await appendLog("info", "Eklenti kuruldu. TCDD sayfasında bir kez manuel arama yapmanız gerekir.");
 });
 

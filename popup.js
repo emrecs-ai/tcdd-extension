@@ -28,7 +28,7 @@
     timeFrom: $("timeFrom"),
     timeTo: $("timeTo"),
     passengerCount: $("passengerCount"),
-    gender: $("gender"),
+    genders: $("genders"),
     cabinClass: $("cabinClass"),
     intervalSec: $("intervalSec"),
     preferredWagon: $("preferredWagon"),
@@ -66,6 +66,49 @@
 
   /** Taramalardan öğrenilmiş tarifeler: { "<fromId>-<toId>": { label, times } } */
   let learnedTimetables = {};
+
+  /** Yolcu bazında cinsiyet: ["E", "K", ...] — uzunluğu yolcu sayısı kadar. */
+  let genderState = ["E"];
+
+  const GENDER_OPTIONS = [
+    { value: "E", label: "Bay" },
+    { value: "K", label: "Bayan" }
+  ];
+
+  /**
+   * Yolcu sayısı kadar cinsiyet seçici üretir.
+   * Sayı artırıldığında yeni yolcular son seçimi devralır, azaltıldığında
+   * fazlalıklar atılır; mevcut seçimler korunur.
+   */
+  function renderGenders() {
+    const n = Math.max(1, Math.min(6, Number(els.passengerCount.value) || 1));
+    while (genderState.length < n) genderState.push(genderState[genderState.length - 1] || "E");
+    genderState = genderState.slice(0, n);
+
+    els.genders.innerHTML = "";
+    genderState.forEach((value, i) => {
+      const item = document.createElement("label");
+      item.className = "gender-item";
+
+      const idx = document.createElement("span");
+      idx.textContent = `${i + 1}.`;
+
+      const select = document.createElement("select");
+      for (const opt of GENDER_OPTIONS) {
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        select.appendChild(o);
+      }
+      select.value = value;
+      select.addEventListener("change", () => {
+        genderState[i] = select.value;
+      });
+
+      item.append(idx, select);
+      els.genders.appendChild(item);
+    });
+  }
 
   /* ====================================================================== */
   /* Yardımcılar                                                            */
@@ -119,16 +162,10 @@
 
     const learnedTimes = (learned && learned.times) || [];
 
-    if (known) {
-      // API farklı saatler döndürüyorsa (saat dilimi / farklı biniş istasyonu)
-      // onlar da listeye eklenir ve işaretlenir; kullanıcı doğrudan seçebilsin.
-      const extra = learnedTimes.filter((t) => !known.times.includes(t));
-      return {
-        label: known.label,
-        times: known.times.concat(extra).sort(),
-        learnedOnly: new Set(extra)
-      };
-    }
+    // Sabit tarife varsa gösterim yalnızca onun üzerinden yapılır.
+    // Öğrenilen saatleri buraya karıştırmak, ayrıştırma hatalarının (ör. eski
+    // saat dilimi okumalarının) listeye kalıcı olarak sızmasına yol açıyor.
+    if (known) return { label: known.label, times: known.times.slice(), learnedOnly: new Set() };
     if (learnedTimes.length) {
       return {
         label: (learned.label || "Önceki taramalardan") + " (öğrenildi)",
@@ -213,7 +250,9 @@
       timeTo: hasTt ? "23:59" : els.timeTo.value || "23:59",
       times,
       passengerCount: Number(els.passengerCount.value) || 1,
-      gender: els.gender.value,
+      genders: genderState.slice(),
+      // Tek cinsiyet bekleyen eski akışlar için ilk yolcunun değeri.
+      gender: genderState[0] || "E",
       cabinClass: els.cabinClass.value,
       intervalSec: Number(els.intervalSec.value) || CFG.DEFAULTS.intervalSec,
       preferredWagon: els.preferredWagon.value ? Number(els.preferredWagon.value) : null,
@@ -235,7 +274,8 @@
     if (s.timeTo) els.timeTo.value = s.timeTo;
     if (Array.isArray(s.times)) selectedTimes = new Set(s.times);
     if (s.passengerCount) els.passengerCount.value = s.passengerCount;
-    if (s.gender) els.gender.value = s.gender;
+    if (Array.isArray(s.genders) && s.genders.length) genderState = s.genders.slice();
+    else if (s.gender) genderState = [s.gender];
     if (s.cabinClass) {
       // Eski sürümlerden kalan değerler ("Ekonomi") yeni listeyle eşleştirilir.
       const options = Array.from(els.cabinClass.options).map((o) => o.value);
@@ -287,6 +327,9 @@
     }
     if (s.intervalSec < CFG.DEFAULTS.minIntervalSec) {
       return `Tarama periyodu en az ${CFG.DEFAULTS.minIntervalSec} saniye olmalı.`;
+    }
+    if (!Array.isArray(s.genders) || s.genders.length !== s.passengerCount) {
+      return "Her yolcu için cinsiyet seçilmeli.";
     }
     return null;
   }
@@ -509,6 +552,8 @@
     els.log.innerHTML = "";
   });
 
+  els.passengerCount.addEventListener("input", renderGenders);
+  els.passengerCount.addEventListener("change", renderGenders);
   els.cabinClass.addEventListener("change", syncWheelchairUi);
   els.fromId.addEventListener("change", renderTimetable);
   els.toId.addEventListener("change", renderTimetable);
@@ -562,6 +607,7 @@
     els.date.value = todayISO();
     renderCabinClasses();
     writeForm(data[KEYS.settings]);
+    renderGenders();
     renderTimetable();
     syncWheelchairUi();
     renderStations(data[KEYS.stations]);

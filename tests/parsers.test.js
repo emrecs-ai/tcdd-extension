@@ -280,6 +280,29 @@ check("seçilmeyen sefer elenir", D.matchesTime("11:50", exactTimes) === false);
 check("aralık modu (seçim yok)", D.matchesTime("11:50", { times: [], timeFrom: "11:00", timeTo: "12:00" }) === true);
 check("aralık dışı elenir", D.matchesTime("12:20", { times: [], timeFrom: "11:00", timeTo: "12:00" }) === false);
 
+/* ---- Örnek 3f: yolcu başına cinsiyet ve koltuk dağıtımı ---- */
+check("cinsiyet listesi aynen kullanılıyor", D.passengerGenders({ genders: ["E", "K", "K"] }, 3).join(",") === "E,K,K");
+check("eksik cinsiyet son değerle tamamlanıyor", D.passengerGenders({ genders: ["K"] }, 3).join(",") === "K,K,K");
+check("fazla cinsiyet kırpılıyor", D.passengerGenders({ genders: ["E", "K", "E"] }, 2).join(",") === "E,K");
+check("eski tek alan destekleniyor", D.passengerGenders({ gender: "K" }, 2).join(",") === "K,K");
+check("hiç bilgi yoksa varsayılan", D.passengerGenders({}, 2).join(",") === "E,E");
+
+const seatPool = [
+  { wagon: "1", seatNo: "1A" },
+  { wagon: "2", seatNo: "5A" },
+  { wagon: "2", seatNo: "5B" },
+  { wagon: "2", seatNo: "5C" },
+  { wagon: "3", seatNo: "9A" }
+];
+const plan2 = D.pickSeatsForPassengers(seatPool, 2);
+check("aynı vagondaki koltuklar önceliklendiriliyor", plan2.slice(0, 2).every((x) => x.wagon === "2"), plan2.slice(0, 2));
+const plan4 = D.pickSeatsForPassengers(seatPool, 4);
+check("tek vagon yetmezse tüm liste dönüyor", plan4.length === seatPool.length, plan4.length);
+const planPref = D.pickSeatsForPassengers(seatPool, 2, "2");
+check("tercih edilen vagon öne alınıyor", planPref.slice(0, 2).every((x) => x.wagon === "2"));
+check("koltuksuz kayıtlar eleniyor", D.pickSeatsForPassengers([{ wagon: "1" }, { wagon: "1", seatNo: "2A" }], 1)[0].seatNo === "2A");
+check("boş listede boş plan", D.pickSeatsForPassengers([], 2).length === 0);
+
 /* ---- Örnek 3e: saat dilimi ve sabit kayma hizalaması ---- */
 check("UTC ISO yerel saate çevriliyor", DU.extractTime("2026-09-27T08:10:00Z") === "11:10", DU.extractTime("2026-09-27T08:10:00Z"));
 check("+03:00 ofseti korunuyor", DU.extractTime("2026-09-27T11:10:00+03:00") === "11:10");
