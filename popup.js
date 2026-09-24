@@ -51,6 +51,7 @@
     stats: $("stats"),
     log: $("log"),
     stationList: $("stationList"),
+    verLabel: $("verLabel"),
     timetableWrap: $("timetableWrap"),
     timetableLabel: $("timetableLabel"),
     timetableHint: $("timetableHint"),
@@ -601,6 +602,13 @@
   }
 
   (async function init() {
+    // Yüklü kodun sürümü: "yeniledim ama değişmedi" durumunu gözle ayırt etmek için.
+    try {
+      els.verLabel.textContent = "v" + chrome.runtime.getManifest().version;
+    } catch (e) {
+      /* yoksay */
+    }
+
     const data = await chrome.storage.local.get([KEYS.settings, KEYS.stations, KEYS.timetables]);
     learnedTimetables = data[KEYS.timetables] || {};
     els.date.min = todayISO();
