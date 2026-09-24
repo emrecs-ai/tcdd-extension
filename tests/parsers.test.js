@@ -10,6 +10,9 @@
  * ekleyip ayrıştırıcıyı ona göre güncellemek en hızlı yoldur.
  * -----------------------------------------------------------------------------
  */
+// Saat dilimi çevriminin doğrulanabilmesi için sabit bölge.
+process.env.TZ = "Europe/Istanbul";
+
 const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
@@ -276,6 +279,27 @@ check("seçili sefer saati eşleşiyor", D.matchesTime("11:10", exactTimes) === 
 check("seçilmeyen sefer elenir", D.matchesTime("11:50", exactTimes) === false);
 check("aralık modu (seçim yok)", D.matchesTime("11:50", { times: [], timeFrom: "11:00", timeTo: "12:00" }) === true);
 check("aralık dışı elenir", D.matchesTime("12:20", { times: [], timeFrom: "11:00", timeTo: "12:00" }) === false);
+
+/* ---- Örnek 3e: saat dilimi ve sabit kayma hizalaması ---- */
+check("UTC ISO yerel saate çevriliyor", DU.extractTime("2026-09-27T08:10:00Z") === "11:10", DU.extractTime("2026-09-27T08:10:00Z"));
+check("+03:00 ofseti korunuyor", DU.extractTime("2026-09-27T11:10:00+03:00") === "11:10");
+check("ofsetsiz değer duvar saati sayılıyor", DU.extractTime("2026-09-27T11:10:00") === "11:10");
+check("dakikadan saate", DU.fromMinutes(670) === "11:10" && DU.fromMinutes(-20) === "23:40");
+
+const aligned = D.alignTimes(["11:10", "11:50", "12:20"], ["10:53", "11:33", "12:03", "15:23"]);
+check("sabit kayma bulundu", aligned && aligned.offsetMin === -17, aligned);
+check("hizalanmış saatler", aligned && aligned.times.join(",") === "10:53,11:33,12:03", aligned && aligned.times);
+check("çoklu seçimde uygulanıyor", aligned && aligned.applied === true);
+check(
+  "değişken fark hizalanmaz",
+  D.alignTimes(["11:10", "11:50"], ["10:53", "11:20"]) === null,
+  D.alignTimes(["11:10", "11:50"], ["10:53", "11:20"])
+);
+check("tam eşleşmede hizalama yok", D.alignTimes(["11:10"], ["11:10", "12:20"]) === null);
+const single = D.alignTimes(["11:10"], ["10:53"]);
+check("tek seçimde sadece öneri", single && single.applied === false, single);
+check("4 saatten büyük fark reddedilir", D.alignTimes(["11:10", "11:50"], ["03:10", "03:50"]) === null);
+check("hizalanmış liste eşleşmeye giriyor", D.matchesTime("10:53", { times: ["11:10"] }, ["10:53"]) === true);
 
 /* ---- Örnek 4: şablon yamalama ve uç nokta çözümleme ---- */
 (async () => {

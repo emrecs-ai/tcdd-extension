@@ -117,13 +117,24 @@
     const known = CFG.KNOWN_TIMETABLES[key];
     const learned = learnedTimetables[key];
 
-    if (known && learned) {
-      const times = Array.from(new Set(known.times.concat(learned.times || []))).sort();
-      return { label: known.label, times };
+    const learnedTimes = (learned && learned.times) || [];
+
+    if (known) {
+      // API farklı saatler döndürüyorsa (saat dilimi / farklı biniş istasyonu)
+      // onlar da listeye eklenir ve işaretlenir; kullanıcı doğrudan seçebilsin.
+      const extra = learnedTimes.filter((t) => !known.times.includes(t));
+      return {
+        label: known.label,
+        times: known.times.concat(extra).sort(),
+        learnedOnly: new Set(extra)
+      };
     }
-    if (known) return known;
-    if (learned && learned.times && learned.times.length) {
-      return { label: (learned.label || "Önceki taramalardan") + " (öğrenildi)", times: learned.times };
+    if (learnedTimes.length) {
+      return {
+        label: (learned.label || "Önceki taramalardan") + " (öğrenildi)",
+        times: learnedTimes.slice().sort(),
+        learnedOnly: new Set(learnedTimes)
+      };
     }
     return null;
   }
@@ -154,9 +165,12 @@
 
     els.timeChips.innerHTML = "";
     for (const time of tt.times) {
+      const learnedOnly = tt.learnedOnly && tt.learnedOnly.has(time);
       const chip = document.createElement("button");
       chip.type = "button";
-      chip.className = "chip-time" + (selectedTimes.has(time) ? " on" : "");
+      chip.className =
+        "chip-time" + (selectedTimes.has(time) ? " on" : "") + (learnedOnly ? " learned" : "");
+      chip.title = learnedOnly ? "Bu saat API yanıtından öğrenildi" : "Tarifedeki sefer saati";
       chip.textContent = time;
       chip.addEventListener("click", () => {
         if (selectedTimes.has(time)) selectedTimes.delete(time);
@@ -166,9 +180,18 @@
       els.timeChips.appendChild(chip);
     }
 
-    els.timetableHint.textContent = selectedTimes.size
-      ? `${selectedTimes.size} sefer taranacak: ${Array.from(selectedTimes).sort().join(", ")}`
-      : "Hiçbiri seçilmezse tüm seferler taranır.";
+    const lines = [];
+    lines.push(
+      selectedTimes.size
+        ? `${selectedTimes.size} sefer taranacak: ${Array.from(selectedTimes).sort().join(", ")}`
+        : "Hiçbiri seçilmezse tüm seferler taranır."
+    );
+
+    if (tt.learnedOnly && tt.learnedOnly.size) {
+      lines.push("Kesik çerçeveliler API yanıtından öğrenildi (tarifeden farklı)");
+    }
+
+    els.timetableHint.textContent = lines.join(" · ");
     els.timetableHint.classList.toggle("on", selectedTimes.size > 0);
   }
 

@@ -239,6 +239,16 @@
       const str = String(text || "");
       const pad = (v) => String(v).padStart(2, "0");
 
+      // Açık saat dilimi taşıyan ISO değerleri (…Z veya …+03:00) yerel saate
+      // çevrilir; aksi halde 3 saatlik kayma yüzünden hiçbir sefer eşleşmez.
+      const zoned = str.match(
+        /(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})/
+      );
+      if (zoned) {
+        const d = new Date(zoned[0].replace(" ", "T"));
+        if (!isNaN(d.getTime())) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      }
+
       let m = str.match(/(\d{4})-(\d{1,2})-(\d{1,2})[T\s](\d{1,2}):([0-5]\d)/);
       if (m) return `${pad(m[4])}:${m[5]}`;
 
@@ -248,6 +258,12 @@
       // Öncesinde rakam veya ':' olmayan ilk HH:mm
       m = str.match(/(?:^|[^\d:])([01]?\d|2[0-3])[:.]([0-5]\d)/);
       return m ? `${pad(m[1])}:${m[2]}` : null;
+    },
+
+    /** dakika -> "HH:mm" (gün sınırında başa sarar) */
+    fromMinutes(mins) {
+      const v = ((Math.round(mins) % 1440) + 1440) % 1440;
+      return `${String(Math.floor(v / 60)).padStart(2, "0")}:${String(v % 60).padStart(2, "0")}`;
     },
 
     /** "HH:mm" -> dakika */

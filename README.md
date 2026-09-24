@@ -88,6 +88,25 @@ seçilmezse tüm seferler taranır.
 - **Öğrenme:** her başarılı taramada dönen gerçek kalkış saatleri güzergâh bazında kaydedilir;
   tanımlı tarifesi olmayan güzergâhlarda (ör. ters yön) liste bir taramadan sonra kendiliğinden
   oluşur. Tarifesi hiç bilinmeyen güzergâhta arayüz saat aralığına düşer.
+- API, tarifeden **farklı** saatler döndürüyorsa bunlar listeye **kesik çerçeveli** çip olarak
+  eklenir ve doğrudan seçilebilir.
+
+#### Saat eşleşmiyorsa ("0 tanesi hedef saatlerde")
+
+Seçtiğiniz saatlerle API'nin döndürdüğü saatler tutmayabilir. İki bilinen sebep var:
+
+1. **Saat dilimi** — yanıt `…Z` veya `…+03:00` gibi açık saat dilimi taşıyorsa değer yerel saate
+   çevrilir; taşımıyorsa duvar saati kabul edilir.
+2. **Farklı biniş istasyonu** — tarifedeki saat Söğütlüçeşme'ye, yanıttaki saat trenin çıkış
+   istasyonuna (ör. Halkalı) ait olabilir. Bu, tüm seferlerde **sabit** bir fark yaratır.
+
+Eklenti bu durumda kör kalmaz:
+
+- Eşleşme sıfırsa **dönen tüm saatler ve API'nin ham değeri** log'a yazılır.
+- Seçimlerinizle dönen saatler arasında **sabit bir fark** varsa (≤ 4 saat) eşleşme otomatik
+  hizalanır ve fark log'a yazılır. En az iki sefer saati seçiliyse uygulanır; tek saat seçiliyse
+  yanlış sefere kilitlenmemek için yalnızca öneri olarak bildirilir.
+- Fark sabit değilse log'daki listeden doğru saatleri (kesik çerçeveli çipler) işaretlemeniz yeterlidir.
 
 Vagon tipi listesi de `src/config.js` → `CABIN_CLASSES` üzerinden üretilir
 (Ekonomi, Business, Loca, Yataklı, Örtülü Kuşet, Tekerlekli Sandalye).
@@ -186,6 +205,7 @@ ayrıştırıcıyı ona göre güncellemek en hızlı yoldur.
 | Belirti | Sebep / Çözüm |
 |---|---|
 | "Güvenlik bilgileri henüz yakalanmadı" | Sayfada henüz manuel arama yapmadınız. Bir arama yapın. |
+| **"0 tanesi hedef saatlerde"** | API farklı saatler döndürüyor (saat dilimi ya da farklı biniş istasyonu). Log'daki "Dönen saatler" satırına bakın; fark sabitse eşleşme otomatik hizalanır, değilse kesik çerçeveli çiplerden doğru saatleri seçin. |
 | **"Ağ hatası … Failed to fetch" (HTTP 0)** | İstek hiç yanıt alamadı: uç nokta öğrenilmemiş (tahmini yol 404 veriyor), gövde şeması tutmuyor ya da bir başlık CORS ön kontrolünde reddediliyor. Çözüm: TCDD sayfasında bir kez **manuel arama** yapın — `Uç nokta` rozeti yeşile döner, eklenti gerçek adresi ve gövdeyi kullanır. |
 | 403 / 401 döngüsü | Captcha süresi doluyor. Sayfayı yenileyip manuel arama yapın; tarama otomatik devam eder. |
 | "Yanıt ayrıştırılamadı veya sefer bulunamadı" | API şeması değişmiş olabilir. Debug modunu açıp ham yanıta bakın, `RE` desenlerini güncelleyin. |

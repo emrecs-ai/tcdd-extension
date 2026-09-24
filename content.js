@@ -37,7 +37,10 @@
     consecutiveErrors: 0,
     scanCount: 0,
     stopped: true,
-    automationRunning: false
+    automationRunning: false,
+    /** API saatleri seçimlerden sabit bir fark gösteriyorsa hizalanmış liste. */
+    alignedTimes: null,
+    timeOffsetMin: 0
   };
 
   /* ====================================================================== */
@@ -727,11 +730,54 @@
    * Kullanıcı tarifeden belirli saatleri seçtiyse (ör. 11:10, 12:20) yalnızca
    * o seferler taranır; seçim yoksa "en erken - en geç" aralığına düşülür.
    */
-  function matchesTime(time, s) {
+  function matchesTime(time, s, alignedTimes) {
     if (Array.isArray(s.times) && s.times.length) {
-      return s.times.includes(time);
+      if (s.times.includes(time)) return true;
+      return Array.isArray(alignedTimes) && alignedTimes.includes(time);
     }
     return timeInWindow(time, s);
+  }
+
+  /**
+   * Seçilen sefer saatleri ile API'den dönen saatler arasında SABİT bir fark
+   * var mı? (Saat dilimi farkı ya da tarifedeki saatin farklı bir istasyona ait
+   * olması böyle bir kaymaya yol açar; ör. Halkalı kalkışı - Söğütlüçeşme.)
+   *
+   * Yalnızca TÜM seçimler aynı farkı gösteriyorsa hizalama yapılır; tek bir
+   * saat seçiliyse yanlış sefere kilitlenmemek için sadece öneri döner.
+   *
+   * @returns {{offsetMin:number, times:string[], applied:boolean}|null}
+   */
+  function alignTimes(selected, parsed) {
+    if (!Array.isArray(selected) || !selected.length || !Array.isArray(parsed) || !parsed.length) return null;
+
+    const selMin = selected.map((t) => U.toMinutes(t));
+    if (selMin.some((v) => v === null)) return null;
+
+    const parsedMin = parsed.map((t) => U.toMinutes(t)).filter((v) => v !== null);
+    if (!parsedMin.length) return null;
+    const parsedSet = new Set(parsedMin);
+
+    // Zaten birebir eşleşiyorsa hizalanacak bir şey yok.
+    if (selMin.every((v) => parsedSet.has(v))) return null;
+
+    // Aday kaymalar: ilk seçim ile dönen her saat arasındaki farklar.
+    // En küçük kaymadan başlayarak, TÜM seçimleri aynı anda eşleyen ilk fark alınır;
+    // "en yakın komşu" yaklaşımı farklı seferlere denk gelip yanlış sonuç verir.
+    const offsets = Array.from(new Set(parsedMin.map((p) => p - selMin[0])))
+      .filter((d) => d !== 0 && Math.abs(d) <= 240)
+      .sort((a, b) => Math.abs(a) - Math.abs(b));
+
+    for (const offset of offsets) {
+      if (selMin.every((v) => parsedSet.has(v + offset))) {
+        return {
+          offsetMin: offset,
+          times: selMin.map((v) => U.fromMinutes(v + offset)),
+          applied: selected.length >= 2
+        };
+      }
+    }
+    return null;
   }
 
   /** Log/başlık için hedef saat açıklaması. */
@@ -815,7 +861,38 @@
         times: trains.map((t) => t.time)
       });
 
-      const candidates = trains.filter((t) => matchesTime(t.time, s));
+      let candidates = trains.filter((t) => matchesTime(t.time, s, state.alignedTimes));
+
+      // Hiç eşleşme yoksa körlemesine devam etmek yerine ne döndüğünü göster.
+      if (!candidates.length && Array.isArray(s.times) && s.times.length) {
+        report(
+          "warn",
+          `Hedef saatlerle eşleşme yok. Dönen saatler: ${trains.map((t) => t.time).join(", ")} ` +
+            `| API'nin ham değeri: "${trains[0].rawTime}"`
+        );
+
+        const align = alignTimes(s.times, trains.map((t) => t.time));
+        if (align) {
+          const sign = align.offsetMin > 0 ? "+" : "";
+          if (align.applied) {
+            state.alignedTimes = align.times;
+            state.timeOffsetMin = align.offsetMin;
+            report(
+              "ok",
+              `API saatleri seçimlerinizden sabit ${sign}${align.offsetMin} dk farklı ` +
+                `(saat dilimi ya da farklı biniş istasyonu). Eşleşme hizalandı: ${align.times.join(", ")}`
+            );
+            candidates = trains.filter((t) => align.times.includes(t.time));
+          } else {
+            report(
+              "warn",
+              `Sabit ${sign}${align.offsetMin} dk fark olabilir (${align.times.join(", ")}). ` +
+                "Otomatik hizalama için en az iki sefer saati seçin veya listeden doğru saatleri işaretleyin."
+            );
+          }
+        }
+      }
+
       report(
         "info",
         `${trains.length} sefer döndü, ${candidates.length} tanesi hedef saatlerde. ` +
@@ -934,6 +1011,8 @@
     state.stopped = false;
     state.consecutiveErrors = 0;
     state.scanCount = 0;
+    state.alignedTimes = null;
+    state.timeOffsetMin = 0;
 
     const intervalSec = Math.max(CFG.DEFAULTS.minIntervalSec, Number(settings.intervalSec) || CFG.DEFAULTS.intervalSec);
     report(
@@ -1236,6 +1315,7 @@
     buildSeatMapBody,
     resolveEndpoint,
     matchesTime,
+    alignTimes,
     apiRequest,
     runScanOnce,
     stopScan

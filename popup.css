@@ -275,6 +275,11 @@ select:focus {
   border-color: var(--accent);
 }
 
+.chip-time.learned {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
 .chip-time.on {
   background: var(--accent);
   border-color: var(--accent);
