@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TCDD Koltuk Tarayıcı</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">🚆</span>
+        <div>
+          <h1>Koltuk Tarayıcı</h1>
+          <p class="sub">TCDD e-Bilet</p>
+        </div>
+      </div>
+      <span id="runBadge" class="badge badge-idle">Beklemede</span>
+    </header>
+
+    <!-- Oturum / token durumu -->
+    <section class="card tokens">
+      <div class="tokens-row">
+        <span class="chip" id="chipAuth" title="Authorization (JWT)">JWT</span>
+        <span class="chip" id="chipXsrf" title="X-Tms-Xsrf-Token">XSRF</span>
+        <span class="chip" id="chipCaptcha" title="Captcha-Session">Captcha</span>
+      </div>
+      <p class="hint" id="tokenHint">
+        Token bekleniyor — TCDD sayfasında bir kez manuel arama yapın.
+      </p>
+      <button class="btn btn-ghost btn-sm" id="btnOpenSite" type="button">TCDD sayfasını aç</button>
+    </section>
+
+    <!-- Arama kriterleri -->
+    <form id="form" class="card" autocomplete="off">
+      <div class="row">
+        <label class="field">
+          <span>Nereden</span>
+          <input type="text" id="fromName" list="stationList" placeholder="ANKARA GAR, ANKARA" required />
+        </label>
+        <label class="field field-sm">
+          <span>ID</span>
+          <input type="number" id="fromId" placeholder="98" required />
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="field">
+          <span>Nereye</span>
+          <input type="text" id="toName" list="stationList" placeholder="İSTANBUL(SÖĞÜTLÜÇEŞME)" required />
+        </label>
+        <label class="field field-sm">
+          <span>ID</span>
+          <input type="number" id="toId" placeholder="1135" required />
+        </label>
+      </div>
+
+      <datalist id="stationList"></datalist>
+
+      <button class="btn btn-ghost btn-sm full" id="btnFillFromCapture" type="button">
+        ↺ Son manuel aramadan doldur
+      </button>
+
+      <div class="row">
+        <label class="field">
+          <span>Tarih</span>
+          <input type="date" id="date" required />
+        </label>
+        <label class="field field-xs">
+          <span>En erken</span>
+          <input type="time" id="timeFrom" value="00:00" required />
+        </label>
+        <label class="field field-xs">
+          <span>En geç</span>
+          <input type="time" id="timeTo" value="23:59" required />
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="field field-xs">
+          <span>Yolcu</span>
+          <input type="number" id="passengerCount" min="1" max="6" value="1" required />
+        </label>
+        <label class="field">
+          <span>Cinsiyet</span>
+          <select id="gender">
+            <option value="E">Bay</option>
+            <option value="K">Bayan</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Vagon tipi</span>
+          <select id="cabinClass">
+            <option value="AUTO">Otomatik</option>
+            <option value="Ekonomi">Ekonomi</option>
+            <option value="Business">Business</option>
+            <option value="Yataklı">Yataklı</option>
+            <option value="Örtülü Kuşet">Örtülü Kuşet</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="field field-xs">
+          <span>Periyot (sn)</span>
+          <input type="number" id="intervalSec" min="8" max="600" value="20" required />
+        </label>
+        <label class="field field-xs">
+          <span>Vagon (ops.)</span>
+          <input type="number" id="preferredWagon" min="1" max="20" placeholder="—" />
+        </label>
+        <div class="field switches">
+          <label class="switch">
+            <input type="checkbox" id="autoSelect" checked />
+            <span>Otomatik seç</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="debug" />
+            <span>Debug log</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="btnStart" type="submit">Taramayı Başlat</button>
+        <button class="btn btn-danger" id="btnStop" type="button" disabled>Durdur</button>
+      </div>
+      <p class="error" id="formError" hidden></p>
+    </form>
+
+    <!-- Canlı durum -->
+    <section class="card log-card">
+      <div class="log-head">
+        <h2>Canlı Kayıt</h2>
+        <button class="btn btn-ghost btn-xs" id="btnClearLog" type="button">Temizle</button>
+      </div>
+      <div class="stats" id="stats">Henüz tarama yapılmadı.</div>
+      <ul class="log" id="log"></ul>
+    </section>
+
+    <footer class="app-footer">
+      Ödeme adımı bilinçli olarak otomatikleştirilmez; koltuk seçildikten sonra işlemi siz tamamlarsınız.
+    </footer>
+
+    <script src="src/config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
