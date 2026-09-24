@@ -313,6 +313,9 @@
     carId: /(trainCarId|carId|vagonId)$/i,
     cabinName: /(cabinClassName|className|vagonTipi|cabinName|typeName)$/i,
     cabinId: /(cabinClassId|classId|cabinId|vagonTipiId|ticketClassId|seatTypeId)$/i,
+    // Biniş istasyonunu tanımak için (kalkış saatini doğru düğümden almak şart)
+    stationIdKey: /^(departureStationId|binisIstasyonId|fromStationId|stationId|istasyonId)$/i,
+    stationNameKey: /^(departureStationName|binisIstasyonAdi|fromStationName|stationName|istasyonAdi)$/i,
     // Koltuğun kendi tip/açıklama alanları (tekerlekli sandalye tespiti için)
     seatTypeName: /(seatType|seatClass|seatDescription|koltukTip|koltukTuru|facility|feature|description)/i
   };
@@ -381,6 +384,59 @@
     return found;
   }
 
+  /** Düğümün kendi anahtarları arasındaki kalkış saati (varış alanları hariç). */
+  function ownDepartureTime(node) {
+    for (const k of Object.keys(node)) {
+      const v = node[k];
+      if (typeof v !== "string") continue;
+      if (!RE.depTime.test(k) || RE.arrivalTime.test(k)) continue;
+      const time = U.extractTime(v);
+      if (time) return { time, key: k, raw: v };
+    }
+    return null;
+  }
+
+  /** Düğüm, kullanıcının biniş istasyonuna mı ait? */
+  function matchesOriginStation(node, from) {
+    if (!from) return false;
+    for (const k of Object.keys(node)) {
+      const v = node[k];
+      if (from.id && RE.stationIdKey.test(k) && String(v) === String(from.id)) return true;
+      if (from.name && RE.stationNameKey.test(k) && typeof v === "string") {
+        const a = U.normalize(v).split(",")[0];
+        const b = U.normalize(from.name).split(",")[0];
+        if (a && b && (a.includes(b) || b.includes(a))) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Kalkış saatini BİNİŞ İSTASYONUNA ait düğümden alır.
+   *
+   * Yanıt seferin tüm duraklarını (her birinde varış + kalkış saatiyle) taşıyor;
+   * körlemesine "ilk kalkış benzeri alan" aramak, ara durakların ve varış
+   * istasyonunun saatlerini sefer sanmaya yol açıyordu (ör. 05:30 seferinin
+   * Ankara varışı 09:59'un ayrı bir sefer gibi görünmesi).
+   */
+  function findOriginDeparture(node, from) {
+    let found = null;
+    (function walk(n, depth) {
+      if (found || !n || typeof n !== "object" || depth > 6) return;
+      if (Array.isArray(n)) return n.forEach((x) => walk(x, depth + 1));
+
+      if (matchesOriginStation(n, from)) {
+        const own = ownDepartureTime(n);
+        if (own) {
+          found = own;
+          return;
+        }
+      }
+      Object.keys(n).forEach((k) => walk(n[k], depth + 1));
+    })(node, 0);
+    return found;
+  }
+
   /**
    * Bir sefer düğümü içindeki vagon tipi (kabin) bazlı boş yer sayılarını çıkarır.
    * Örn: [{ label: "EKONOMİ", id: 1, count: 3, wheelchair: false }]
@@ -434,11 +490,21 @@
    * Alan adları sürümden sürüme değişebildiği için sabit bir şema varsaymak
    * yerine, "id + kalkış saati taşıyan en iç düğüm" mantığı ile çalışır.
    */
-  function extractTrains(json) {
-    const candidates = deepCollect(json, (n) => {
-      const hasId = Object.keys(n).some((k) => RE.trainId.test(k));
-      return hasId && !!findDepartureTime(n, 4);
-    });
+  function extractTrains(json, from) {
+    const hasIdAndTime = (n) =>
+      Object.keys(n).some((k) => RE.trainId.test(k)) && !!findDepartureTime(n, 4);
+
+    /**
+     * Sefer düğümü, koltuk/yer bilgisi TAŞIYAN düğümdür. Bu şart olmadan
+     * yanıttaki duraklar (her birinde kalkış saati var) "en içteki" oldukları
+     * için seferin yerine geçiyor; o zaman da saat yanlış (ara durak / varış)
+     * oluyor ve kabin sayıları kayboluyor.
+     */
+    let candidates = deepCollect(json, (n) => hasIdAndTime(n) && extractCabins(n).length > 0);
+    if (!candidates.length) {
+      candidates = deepCollect(json, hasIdAndTime);
+      if (candidates.length) U.warn("Yer bilgisi taşıyan sefer düğümü yok; gevşek eşleşmeye düşüldü.");
+    }
     if (!candidates.length) U.warn("Yanıtta sefer düğümü bulunamadı.");
 
     // İç içe eşleşmelerde en içteki (en spesifik) düğümü koru:
@@ -451,8 +517,10 @@
 
     const trains = [];
     for (const n of innermost) {
-      const rawTime = findDepartureTime(n, 4);
-      const time = U.extractTime(rawTime);
+      // Önce biniş istasyonuna sabitlenmiş saat, yoksa genel arama.
+      const anchored = from && (from.id || from.name) ? findOriginDeparture(n, from) : null;
+      const rawTime = anchored ? anchored.raw : findDepartureTime(n, 4);
+      const time = anchored ? anchored.time : U.extractTime(rawTime);
       if (!time) continue;
 
       const cabins = extractCabins(n);
@@ -465,15 +533,25 @@
         id: pick(n, RE.trainId),
         name: String(pick(n, RE.trainName) || "").slice(0, 60),
         rawTime,
+        rawKey: anchored ? anchored.key : null,
+        anchored: !!anchored,
         time,
         cabins,
         emptyCount
       });
     }
 
+    // Biniş istasyonuna sabitlenebilen kayıtlar varsa, sabitlenemeyenler
+    // (ara durak / varış düğümleri) elenir.
+    const anchoredTrains = trains.filter((t) => t.anchored);
+    const useList = anchoredTrains.length ? anchoredTrains : trains;
+    if (anchoredTrains.length && anchoredTrains.length < trains.length) {
+      U.log(`${trains.length - anchoredTrains.length} düğüm biniş istasyonuna ait olmadığı için elendi.`);
+    }
+
     // Aynı sefer birden çok kez yakalanabilir; saat + id ile tekilleştir.
     const uniq = new Map();
-    for (const t of trains) {
+    for (const t of useList) {
       const key = `${t.id}|${t.time}`;
       const prev = uniq.get(key);
       if (!prev || t.emptyCount > prev.emptyCount) uniq.set(key, t);
@@ -851,7 +929,7 @@
       state.consecutiveErrors = 0;
       if (s.debug) U.log("Arama yanıtı (ham):", res.json);
 
-      const trains = extractTrains(res.json);
+      const trains = extractTrains(res.json, { id: s.fromId, name: s.fromName });
       if (!trains.length) {
         report("warn", "Yanıt ayrıştırılamadı veya sefer bulunamadı. (Ayrıntı için Debug modunu açın.)");
         return;
@@ -872,7 +950,8 @@
         report(
           "warn",
           `Hedef saatlerle eşleşme yok. Dönen saatler: ${trains.map((t) => t.time).join(", ")} ` +
-            `| API'nin ham değeri: "${trains[0].rawTime}"`
+            `| API'nin ham değeri: "${trains[0].rawTime}"` +
+            (trains[0].rawKey ? ` (alan: ${trains[0].rawKey})` : " (biniş istasyonuna sabitlenemedi)")
         );
 
         const align = alignTimes(s.times, trains.map((t) => t.time));
@@ -1059,19 +1138,38 @@
   /* 5) DOM otomasyonu                                                      */
   /* ====================================================================== */
 
-  /** Sefer listesinde hedef saate ait satırı bulur. */
+  /**
+   * Sefer listesinde hedef saate ait kartı bulur.
+   *
+   * ÖNEMLİ: Eşleşme yalnızca kartın İLK saat hücresine (kalkış) bakılarak
+   * yapılır. Saati kartın herhangi bir yerinde aramak, varış saatiyle
+   * eşleşip yanlış sefere tıklanmasına yol açıyordu (ör. 09:59 varışı
+   * 05:30 seferinin kartının içinde).
+   */
   function findTrainRow(targetTime) {
+    const cells = findTimeCells();
+
+    const departureOf = (container) => {
+      const first = cells.find((c) => container.contains(c));
+      return first ? U.extractTime(U.textOf(first)) : null;
+    };
+
+    for (const card of findTripCards()) {
+      if (departureOf(card) === targetTime) return card;
+    }
+
+    // Yedek 1: yapılandırmadaki satır seçicileri (yine yalnızca ilk saat hücresi)
     const rows = U.queryAllCandidates(CFG.SELECTORS.trainRow).filter(U.isVisible);
     for (const row of rows) {
-      const text = U.textOf(row);
-      const rowTime = U.extractTime(text);
-      if (rowTime === targetTime) return row;
+      if (departureOf(row) === targetTime) return row;
     }
-    // Aday satır bulunamadıysa saati içeren en küçük tıklanabilir kapsayıcıyı ara.
-    const all = Array.from(document.querySelectorAll("div,li,tr,article,section")).filter(U.isVisible);
-    const matches = all.filter((el) => U.extractTime(U.textOf(el)) === targetTime && U.textOf(el).length < 800);
-    matches.sort((a, b) => U.textOf(a).length - U.textOf(b).length);
-    return matches[0] || null;
+
+    // Yedek 2: saat hücresi bulunamayan düzenlerde satır metnindeki İLK saat.
+    // extractTime ilk saati döndürdüğü için varış saatiyle eşleşme olmaz.
+    for (const row of rows) {
+      if (U.extractTime(U.textOf(row)) === targetTime) return row;
+    }
+    return null;
   }
 
   /** Bir koltuk elemanının sınıf/etiket bilgisini toplar. */
@@ -1515,6 +1613,7 @@
   window.__TCDD_DEBUG__ = {
     state,
     extractTrains,
+    findOriginDeparture,
     extractCabins,
     countForCabin,
     extractEmptySeats,

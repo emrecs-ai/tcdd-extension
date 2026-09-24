@@ -109,6 +109,62 @@ check("dolu sefer 0 yer", trains[0].emptyCount === 0);
 check("14:30 seferi 4 yer", trains[1].emptyCount === 4, trains[1].emptyCount);
 check("tren adı okundu", trains[1].name === "YHT 12347", trains[1].name);
 
+/* ---- Örnek 1b: duraklı yanıt — saat biniş istasyonundan alınmalı ---- */
+// Gerçek yanıt seferin tüm duraklarını taşır; her durakta kalkış saati vardır.
+// Biniş istasyonuna sabitlenmezse ara durak / varış saatleri sefer sanılır.
+const availabilityWithStops = {
+  trainLegs: [
+    {
+      trainAvailabilities: [
+        {
+          trains: [
+            {
+              id: 81002,
+              commercialName: "YHT 81002",
+              stops: [
+                {
+                  id: 9001,
+                  stationId: 1325,
+                  stationName: "İSTANBUL(SÖĞÜTLÜÇEŞME)",
+                  departureTime: "2026-09-27T02:30:00",
+                  arrivalTime: null
+                },
+                {
+                  id: 9002,
+                  stationId: 500,
+                  stationName: "ESKİŞEHİR",
+                  arrivalTime: "2026-09-27T04:00:00",
+                  departureTime: "2026-09-27T04:05:00"
+                },
+                {
+                  id: 9003,
+                  stationId: 98,
+                  stationName: "ANKARA GAR",
+                  arrivalTime: "2026-09-27T06:59:00",
+                  departureTime: "2026-09-27T06:59:00"
+                }
+              ],
+              cabinClassAvailabilities: [{ cabinClass: { id: 1, name: "EKONOMİ" }, availabilityCount: 5 }]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+};
+
+const stopTrains = D.extractTrains(availabilityWithStops, { id: 1325, name: "İSTANBUL(SÖĞÜTLÜÇEŞME)" });
+check("duraklı yanıtta tek sefer", stopTrains.length === 1, stopTrains.map((t) => t.time));
+check("saat biniş istasyonundan (02:30 UTC -> 05:30)", stopTrains[0] && stopTrains[0].time === "05:30", stopTrains[0] && stopTrains[0].time);
+check("varış saati (09:59) sefer sayılmıyor", !stopTrains.some((t) => t.time === "09:59"));
+check("ara durak (07:05) sefer sayılmıyor", !stopTrains.some((t) => t.time === "07:05"));
+check("kabin sayısı korunuyor", stopTrains[0] && stopTrains[0].emptyCount === 5, stopTrains[0] && stopTrains[0].emptyCount);
+check("hangi alandan okunduğu kaydediliyor", stopTrains[0] && stopTrains[0].rawKey === "departureTime", stopTrains[0] && stopTrains[0].rawKey);
+
+// İstasyon ADI ile de sabitlenebilmeli (ID bilinmiyorsa)
+const byName = D.extractTrains(availabilityWithStops, { name: "İSTANBUL(SÖĞÜTLÜÇEŞME), İSTANBUL" });
+check("istasyon adıyla sabitleme", byName.length === 1 && byName[0].time === "05:30", byName.map((t) => t.time));
+
 /* ---- Örnek 2: alternatif şema (Türkçe alan adları) ---- */
 const availabilityTr = {
   seferler: [

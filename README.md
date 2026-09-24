@@ -130,6 +130,21 @@ Bu yüzden ek taşımayan ISO değerleri UTC kabul edilip **sabit UTC+3** ile se
 kullanıcıda da tarife doğru görünür. `…Z` / `…+03:00` taşıyan değerler de aynı sonuca çevrilir.
 API bir gün yerel saat göndermeye başlarsa `API_TIME.naiveIsUtc = false` yapmak yeterlidir.
 
+#### Kalkış saati hangi düğümden okunur?
+
+Yanıt, seferin **tüm duraklarını** taşır ve her durakta bir kalkış saati vardır. Körlemesine
+"ilk kalkış benzeri alan" aramak, ara durak ve varış saatlerini ayrı sefer sanmaya yol açıyordu
+(ör. 05:30 seferinin Ankara varışı 09:59'un ayrı bir sefer gibi görünmesi). Bu yüzden:
+
+- Sefer düğümü sayılmak için düğümün **yer/koltuk bilgisi taşıması** gerekir; duraklar böylece elenir.
+- Kalkış saati, **kullanıcının biniş istasyonuna** ait düğümden okunur (istasyon ID'si, yoksa adı ile).
+- Sabitlenemeyen düğümler, sabitlenebilen en az bir kayıt varsa tamamen elenir.
+- Log'da saatin hangi alandan okunduğu yazılır: `API'nin ham değeri: "…" (alan: departureTime)`.
+
+Aynı kural DOM tarafında da geçerlidir: sefer kartı eşleştirmesi kartın **ilk saat hücresine**
+(kalkış) bakar. Saati kartın herhangi bir yerinde aramak, varış saatiyle eşleşip yanlış sefere
+tıklanmasına yol açıyordu.
+
 #### Saat yine de eşleşmiyorsa ("0 tanesi hedef saatlerde")
 
 Geriye kalan olası sebep, tarifedeki saatin farklı bir biniş istasyonuna (ör. Halkalı) ait
@@ -230,6 +245,7 @@ Tarayıcı olmadan çalışan birim testleri:
 ```bash
 node tests/parsers.test.js    # ayrıştırıcılar, şablon yamalama, uç nokta çözümleme, saat eşleşmesi
 node tests/manifest.test.js   # manifest ve dosya referansları
+node tests/dom.test.js        # sayfadan okuma + sefer kartı eşleştirme (Chromium gerekir)
 ```
 
 API yanıt şeması değişirse, gerçek yanıtı `tests/parsers.test.js` içine örnek olarak ekleyip
