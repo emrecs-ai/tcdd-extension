@@ -332,6 +332,14 @@ check("dakikaya çevirme", DU.toMinutes("14:30") === 870);
 check("koltuk no", DU.extractSeatNo("Koltuk 12A") === "12A", DU.extractSeatNo("Koltuk 12A"));
 check("normalize", DU.normalize("  EKONOMİ  ") === DU.normalize("ekonomi"));
 
+/* ---- Örnek 3c-2: tekerlekli sandalye yer sayısı raporlaması ---- */
+check("tekerlekli sandalye yer sayısı", D.wheelchairCount(wheelchairOnlyTrain) === 2, D.wheelchairCount(wheelchairOnlyTrain));
+check(
+  "normal seferde tekerlekli sandalye yok",
+  D.wheelchairCount({ cabins: [{ label: "EKONOMİ", count: 4, wheelchair: false }] }) === 0
+);
+check("kabinsiz seferde sıfır", D.wheelchairCount({}) === 0);
+
 /* ---- Örnek 3d: sefer saati eşleşmesi ---- */
 const exactTimes = { times: ["11:10", "12:20"], timeFrom: "00:00", timeTo: "23:59" };
 check("seçili sefer saati eşleşiyor", D.matchesTime("11:10", exactTimes) === true);

@@ -46,9 +46,28 @@
      */
     ENDPOINT_PATTERNS: [
       { kind: "seatMap", re: /(seat-?maps?|load-by-train-id|koltuk)/i },
-      { kind: "availability", re: /(train-availability|availabilit|trip-search|sefer|search)/i },
+      {
+        kind: "availability",
+        re: /(train-availability|availabilit|trip-search|sefer|search)/i,
+        /**
+         * "availability-calendar" tarih bazlı doluluk takvimidir, sefer listesi
+         * DÖNDÜRMEZ. Deseni eşlediği için şablon olarak saklanıyor ve doğru
+         * uç noktanın (train-availability) üzerine yazabiliyordu.
+         */
+        exclude: /(calendar|takvim|price|fiyat)/i
+      },
       { kind: "stationPairs", re: /(station-pairs|stations|istasyon)/i }
     ],
+
+    /** Bir URL'nin hangi işleme ait olduğunu bulur (dışlamalar dahil). */
+    matchEndpoint(url) {
+      const text = String(url || "");
+      return (
+        globalThis.TCDD_CONFIG.ENDPOINT_PATTERNS.find(
+          (p) => p.re.test(text) && !(p.exclude && p.exclude.test(text))
+        ) || null
+      );
+    },
 
     /**
      * Yakalanan (capture edilen) başlıklar. Küçük harf ile tutulur.

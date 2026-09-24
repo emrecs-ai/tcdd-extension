@@ -243,7 +243,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       if (details.method !== "POST") return;
       if (!/\/tms\//i.test(details.url)) return;
 
-      const match = CFG.ENDPOINT_PATTERNS.find((p) => p.re.test(details.url));
+      const match = CFG.matchEndpoint(details.url);
       if (!match || match.kind === "stationPairs") return;
 
       const raw = details.requestBody && details.requestBody.raw;

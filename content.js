@@ -124,7 +124,7 @@
     // adresin birebir aynısı kullanılır (yanlış yol -> 404 -> "Failed to fetch").
     if (msg.body && typeof msg.body === "object") {
       const url = String(msg.url);
-      const match = CFG.ENDPOINT_PATTERNS.find((p) => p.re.test(url));
+      const match = CFG.matchEndpoint(url);
       if (match && match.kind !== "stationPairs") {
         U.log(`İstek şablonu yakalandı [${match.kind}]:`, url);
         send(MSG.CAPTURED_TEMPLATE, { kind: match.kind, url, body: msg.body });
@@ -559,6 +559,11 @@
     return Array.from(uniq.values()).sort((a, b) => U.toMinutes(a.time) - U.toMinutes(b.time));
   }
 
+  /** Seferdeki tekerlekli sandalye (engelli) kabinlerinin yer sayısı. */
+  function wheelchairCount(train) {
+    return (train.cabins || []).reduce((acc, c) => acc + (c.wheelchair ? c.count || 0 : 0), 0);
+  }
+
   /** Kullanıcı tekerlekli sandalye koltuklarını özellikle istedi mi? */
   function wantsWheelchair(s) {
     return !!(s && (s.includeWheelchair === true || isWheelchairLabel(s.cabinClass)));
@@ -978,22 +983,34 @@
 
       report(
         "info",
-        `${trains.length} sefer döndü, ${candidates.length} tanesi hedef saatlerde. ` +
-          candidates.map((t) => `${t.time}:${countForCabin(t, s)}`).join(" ")
+        `${trains.length} sefer döndü, ${candidates.length} tanesi hedef saatlerde → ` +
+          (candidates.length
+            ? candidates
+                .map((t) => {
+                  const usable = countForCabin(t, s);
+                  const wc = wantsWheelchair(s) ? 0 : wheelchairCount(t);
+                  return `${t.time}: ${usable} yer` + (wc ? ` (+${wc} tekerlekli sandalye, elendi)` : "");
+                })
+                .join(" · ")
+            : "—")
       );
 
       const need = Number(s.passengerCount) || 1;
       const hit = candidates.find((t) => countForCabin(t, s) >= need);
       if (!hit) {
-        // Kabin kırılımında yalnızca tekerlekli sandalye kabini boşsa bunu görünür kıl.
-        const wheelchairOnly = candidates.find(
-          (t) => (t.cabins || []).some((c) => c.wheelchair && c.count > 0) && countForCabin(t, s) < need
-        );
-        if (wheelchairOnly && !wantsWheelchair(s)) {
-          report(
-            "info",
-            `${wheelchairOnly.time} seferinde yalnızca tekerlekli sandalye koltuğu boş; ayarlar gereği yok sayıldı.`
+        // Yalnızca tekerlekli sandalye kabini boş olan TÜM seferleri bildir;
+        // tek örnek bildirmek "sadece o sefer taranıyor" izlenimi veriyordu.
+        if (!wantsWheelchair(s)) {
+          const wheelchairOnly = candidates.filter(
+            (t) => wheelchairCount(t) > 0 && countForCabin(t, s) < need
           );
+          if (wheelchairOnly.length) {
+            report(
+              "info",
+              `Yalnızca tekerlekli sandalye koltuğu boş (ayarlar gereği yok sayıldı): ` +
+                wheelchairOnly.map((t) => `${t.time} (${wheelchairCount(t)} yer)`).join(", ")
+            );
+          }
         }
         return;
       }
@@ -1622,6 +1639,7 @@
     isWheelchairNode,
     isWheelchairSeatElement,
     wantsWheelchair,
+    wheelchairCount,
     passengerGenders,
     pickSeatsForPassengers,
     findTrainRow,
