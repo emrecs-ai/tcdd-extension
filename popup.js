@@ -185,12 +185,27 @@
     const tt = currentTimetable();
     const hasTt = !!(tt && tt.times && tt.times.length);
 
-    els.timetableWrap.hidden = !hasTt;
+    // Tarife yoksa kutu gizlenmiyor: NEDEN saat aralığına düşüldüğü yazılıyor.
+    // Aksi halde "saatler yine aralık olmuş" gibi görünüyor.
+    els.timetableWrap.hidden = false;
     els.timeFromField.hidden = hasTt;
     els.timeToField.hidden = hasTt;
+    els.timeChips.hidden = !hasTt;
+    els.btnTimesAll.hidden = !hasTt;
+    els.btnTimesNone.hidden = !hasTt;
 
     if (!hasTt) {
       selectedTimes.clear();
+      els.timeChips.innerHTML = "";
+
+      const hasRoute = !!(els.fromId.value && els.toId.value);
+      els.timetableLabel.textContent = hasRoute ? "Sefer saatleri" : "Güzergâh seçilmedi";
+      els.timetableHint.classList.remove("on");
+      els.timetableHint.textContent = hasRoute
+        ? `Bu güzergâh (${els.fromId.value} → ${els.toId.value}) için tanımlı tarife yok. ` +
+          "Saat aralığı kullanılıyor; ilk başarılı taramadan sonra sefer saatleri burada liste olarak çıkacak."
+        : "Kalkış ve varış istasyonlarını doldurun (veya 'Son manuel aramadan doldur'). " +
+          "Tarifesi tanımlı güzergâhlarda saat aralığı yerine sefer saati listesi çıkar.";
       return;
     }
 
