@@ -34,10 +34,18 @@
      * (HTTP 0) ile düşmesine yol açar.
      */
     ENDPOINTS: {
-      stationPairs: "/tms/station/station-pairs-INTERNET",
-      availability: "/tms/train/train-availability",
-      seatMap: "/tms/seat-maps/load-by-train-id"
+      stationPairs: "/tms/station/station-pairs-INTERNET?environment=dev&userId=1",
+      availability: "/tms/train/train-availability?environment=dev&userId=1",
+      seatMap: "/tms/seat-maps/load-by-train-id?environment=dev&userId=1"
     },
+
+    /**
+     * Sorgu dizesi neden var?
+     * Sayfanın gerçek istekleri "?environment=dev&userId=1" ile gidiyor. Bu ek
+     * olmadan sunucu 404 dönüyor, 404 yanıtında CORS başlığı bulunmadığı için
+     * tarayıcı isteği "Failed to fetch" (HTTP 0) ile düşürüyor. Yedek adres bu
+     * yüzden sorgu dizesiyle birlikte tutulur.
+     */
 
     /**
      * Yakalanan isteğin hangi amaca hizmet ettiğini URL'den tanımak için
