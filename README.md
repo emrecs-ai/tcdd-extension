@@ -186,6 +186,7 @@ Eşleştirme `src/config.js` → `WHEELCHAIR` altındadır:
 | Alan | Görev |
 |---|---|
 | `namePatterns` | Sınıf/koltuk adı eşleşmeleri ("tekerlekli sandalye", "engelli", "wheelchair" ...) |
+| `maxPlausibleSeats` | Bir kabinde tekerlekli sandalye için makul azami yer sayısı (varsayılan 6). Daha büyük bir değer etiketin ya da sayılan alanın yanlış olduğuna işaret eder; o kabin **şüpheli** sayılır, normal kabin gibi değerlendirilir ve log'a yazılır. Gerçekten engelli koltuğuysa koltuk haritası filtresi yine de eler. |
 | `classIds` | Bilinen sınıf ID'leri. TCDD adı değiştirirse ID eklemek filtreyi ayakta tutar. |
 | `flagKeys` | Boolean bayrak anahtarları. `disabled` gibi çok anlamlı alanlar bilinçli olarak dışarıda (bazı şemalarda "seçilemez" demek). |
 
@@ -256,6 +257,7 @@ ayrıştırıcıyı ona göre güncellemek en hızlı yoldur.
 | Belirti | Sebep / Çözüm |
 |---|---|
 | "Güvenlik bilgileri henüz yakalanmadı" | Sayfada henüz manuel arama yapmadınız. Bir arama yapın. |
+| **"Engelli etiketli kabinde makul olmayan yer sayısı"** | Kabin adı engelli sınıfına işaret ediyor ama yer sayısı çok yüksek (ör. 10). Etiket şüpheli sayılır ve yerler taramaya dahil edilir. Log'daki "Kabin dökümü" satırı hangi alandan hangi sayının okunduğunu gösterir; gerçek sınıf ID'sini görüp `WHEELCHAIR.classIds`'e eklemek kalıcı çözümdür. |
 | **"0 tanesi hedef saatlerde"** | API farklı saatler döndürüyor (saat dilimi ya da farklı biniş istasyonu). Log'daki "Dönen saatler" satırına bakın; fark sabitse eşleşme otomatik hizalanır, değilse kesik çerçeveli çiplerden doğru saatleri seçin. |
 | **"Ağ hatası … Failed to fetch" (HTTP 0)** | İstek hiç yanıt alamadı: uç nokta öğrenilmemiş (tahmini yol 404 veriyor), gövde şeması tutmuyor ya da bir başlık CORS ön kontrolünde reddediliyor. Çözüm: TCDD sayfasında bir kez **manuel arama** yapın — `Uç nokta` rozeti yeşile döner, eklenti gerçek adresi ve gövdeyi kullanır. |
 | 403 / 401 döngüsü | Captcha süresi doluyor. Sayfayı yenileyip manuel arama yapın; tarama otomatik devam eder. |

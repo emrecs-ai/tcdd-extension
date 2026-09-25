@@ -474,11 +474,19 @@
         }
 
         const labelText = String(label || "");
+        // Neden engelli sayıldığı kaydedilir: yanlış etiketlemeyi log'dan görebilmek için.
+        let reason = null;
+        if (isWheelchairLabel(labelText)) reason = "ad";
+        else if (isWheelchairId(cabinId)) reason = "id";
+        else if (wheelchair) reason = "bayrak";
+
         cabins.push({
           label: labelText,
           id: cabinId === undefined ? null : cabinId,
           count: n[countKey],
-          wheelchair: wheelchair || isWheelchairLabel(labelText) || isWheelchairId(cabinId)
+          countKey,
+          wheelchair: !!reason,
+          reason
         });
       }
 
@@ -561,9 +569,38 @@
     return Array.from(uniq.values()).sort((a, b) => U.toMinutes(a.time) - U.toMinutes(b.time));
   }
 
-  /** Seferdeki tekerlekli sandalye (engelli) kabinlerinin yer sayısı. */
+  /**
+   * Bir kabin gerçekten tekerlekli sandalye kabini sayılmalı mı?
+   *
+   * Etiketi öyle olsa bile makul olmayan büyüklükteki yer sayıları (ör. 10)
+   * ya yanlış etiketlemeye ya da yanlış alanın sayılmasına işaret eder.
+   * Böyle kabinler normal kabin gibi değerlendirilir; gerçekten engelli
+   * koltuğuysa koltuk haritası filtresi ikinci kapı olarak eler.
+   */
+  function isTrustedWheelchairCabin(cabin) {
+    if (!cabin || !cabin.wheelchair) return false;
+    return (cabin.count || 0) <= CFG.WHEELCHAIR.maxPlausibleSeats;
+  }
+
+  /** Seferdeki (güvenilir şekilde) tekerlekli sandalye olarak işaretli yer sayısı. */
   function wheelchairCount(train) {
-    return (train.cabins || []).reduce((acc, c) => acc + (c.wheelchair ? c.count || 0 : 0), 0);
+    return (train.cabins || []).reduce((acc, c) => acc + (isTrustedWheelchairCabin(c) ? c.count || 0 : 0), 0);
+  }
+
+  /** Engelli etiketi taşıyıp makul olmayan büyüklükteki kabinler. */
+  function suspectCabins(train) {
+    return (train.cabins || []).filter((c) => c.wheelchair && !isTrustedWheelchairCabin(c));
+  }
+
+  /** Log için kabin dökümü: "EKONOMİ(id:1)=10 [ad]" */
+  function describeCabins(train) {
+    return (train.cabins || [])
+      .map(
+        (c) =>
+          `${c.label || "?"}${c.id !== null && c.id !== undefined ? "(id:" + c.id + ")" : ""}` +
+          `=${c.count}${c.countKey ? " «" + c.countKey + "»" : ""}${c.wheelchair ? " [engelli:" + c.reason + "]" : ""}`
+      )
+      .join(", ");
   }
 
   /** Kullanıcı tekerlekli sandalye koltuklarını özellikle istedi mi? */
@@ -599,8 +636,9 @@
     let pool = labeled;
     if (onlyWheelchair(s)) {
       pool = pool.filter((c) => c.wheelchair);
+      // "Yalnızca engelli" modunda şüpheli büyüklükler de dahil edilir.
     } else {
-      if (!wantsWheelchair(s)) pool = pool.filter((c) => !c.wheelchair);
+      if (!wantsWheelchair(s)) pool = pool.filter((c) => !isTrustedWheelchairCabin(c));
       if (s.cabinClass && s.cabinClass !== "AUTO") {
         const wanted = U.normalize(s.cabinClass);
         pool = pool.filter((c) => c.label && U.normalize(c.label).includes(wanted));
@@ -1023,6 +1061,25 @@
             : "—")
       );
 
+      // İlk taramada kabin dökümü: hangi alandan hangi sayının okunduğu görünsün.
+      if (state.scanCount === 1 && candidates.length) {
+        report("info", `Kabin dökümü (${candidates[0].time}): ${describeCabins(candidates[0])}`);
+      }
+
+      // Engelli etiketi taşıyıp makul olmayan büyüklükteki kabinler: etiketleme
+      // ya da sayılan alan yanlış demektir; bunları elemek gerçek yerleri gizler.
+      const suspects = candidates.filter((t) => suspectCabins(t).length);
+      if (suspects.length && !wantsWheelchair(s)) {
+        const detail = suspects
+          .map((t) => `${t.time} → ${suspectCabins(t).map((c) => `${c.label || "?"}=${c.count}`).join(", ")}`)
+          .join(" · ");
+        report(
+          "warn",
+          `Engelli etiketli kabinde makul olmayan yer sayısı (> ${CFG.WHEELCHAIR.maxPlausibleSeats}): ${detail}. ` +
+            "Etiket şüpheli sayıldı, bu yerler taramaya DAHİL edildi; gerçekten engelli koltuğuysa koltuk haritası adımında elenecek."
+        );
+      }
+
       const need = Number(s.passengerCount) || 1;
       const hit = candidates.find((t) => countForCabin(t, s) >= need);
       if (!hit) {
@@ -1036,7 +1093,7 @@
             report(
               "info",
               `Yalnızca tekerlekli sandalye koltuğu boş (ayarlar gereği yok sayıldı): ` +
-                wheelchairOnly.map((t) => `${t.time} (${wheelchairCount(t)} yer)`).join(", ")
+                wheelchairOnly.map((t) => `${t.time} → ${describeCabins(t)}`).join(" · ")
             );
           }
         }
@@ -1669,6 +1726,9 @@
     isWheelchairSeatElement,
     wantsWheelchair,
     wheelchairCount,
+    isTrustedWheelchairCabin,
+    suspectCabins,
+    describeCabins,
     passengerGenders,
     pickSeatsForPassengers,
     findTrainRow,

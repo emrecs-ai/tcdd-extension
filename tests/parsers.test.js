@@ -340,6 +340,43 @@ check(
 );
 check("kabinsiz seferde sıfır", D.wheelchairCount({}) === 0);
 
+/* ---- Örnek 3c-3: makul olmayan engelli kapasitesi şüpheli sayılır ---- */
+const bigWheelchair = D.extractTrains({
+  trains: [
+    {
+      id: 7100,
+      departureTime: "2026-09-27T11:24:00",
+      cabinClassAvailabilities: [
+        { cabinClass: { id: 1, name: "EKONOMİ" }, availabilityCount: 0 },
+        { cabinClass: { id: 9, name: "TEKERLEKLİ SANDALYE" }, availabilityCount: 10 }
+      ]
+    }
+  ]
+})[0];
+
+check("etiket engelli olarak okunuyor", bigWheelchair.cabins[1].wheelchair === true && bigWheelchair.cabins[1].reason === "ad", bigWheelchair.cabins[1]);
+check("10 yer güvenilir sayılmıyor", D.isTrustedWheelchairCabin(bigWheelchair.cabins[1]) === false);
+check("şüpheli kabin listeleniyor", D.suspectCabins(bigWheelchair).length === 1);
+check("şüpheli yerler sayıma dahil", D.countForCabin(bigWheelchair, { cabinClass: "AUTO" }) === 10, D.countForCabin(bigWheelchair, { cabinClass: "AUTO" }));
+check("engelli sayacı şüphelileri saymıyor", D.wheelchairCount(bigWheelchair) === 0, D.wheelchairCount(bigWheelchair));
+
+// Makul kapasite (2) eskisi gibi elenmeli
+const smallWheelchair = D.extractTrains({
+  trains: [
+    {
+      id: 7101,
+      departureTime: "2026-09-27T11:24:00",
+      cabinClassAvailabilities: [
+        { cabinClass: { id: 1, name: "EKONOMİ" }, availabilityCount: 0 },
+        { cabinClass: { id: 9, name: "TEKERLEKLİ SANDALYE" }, availabilityCount: 2 }
+      ]
+    }
+  ]
+})[0];
+check("2 yer güvenilir engelli kabini", D.isTrustedWheelchairCabin(smallWheelchair.cabins[1]) === true);
+check("makul engelli kabini eleniyor", D.countForCabin(smallWheelchair, { cabinClass: "AUTO" }) === 0);
+check("kabin dökümü okunur", /TEKERLEKLİ SANDALYE\(id:9\)=2 «availabilityCount» \[engelli:ad\]/.test(D.describeCabins(smallWheelchair)), D.describeCabins(smallWheelchair));
+
 /* ---- Örnek 3d: sefer saati eşleşmesi ---- */
 const exactTimes = { times: ["11:10", "12:20"], timeFrom: "00:00", timeTo: "23:59" };
 check("seçili sefer saati eşleşiyor", D.matchesTime("11:10", exactTimes) === true);

@@ -148,18 +148,28 @@
         "wheelchair",
         "handicap",
         "handicapped",
-        "disabled",
-        "accessible",
         "ozel ihtiyac"
       ],
+      /**
+       * Bir kabinde tekerlekli sandalye için makul görülen azami yer sayısı.
+       * YHT setlerinde bu sayı 2-4'tür. Daha büyük bir değer, etiketin ya da
+       * sayılan alanın yanlış olduğuna işaret eder; o kabin "şüpheli" sayılıp
+       * normal kabin gibi değerlendirilir. Gerçekten engelli koltuğuysa ikinci
+       * kapı olan koltuk haritası filtresi yine de eler.
+       */
+      maxPlausibleSeats: 6,
       /**
        * Bilinen sınıf ID'leri. TCDD, tekerlekli sandalye sınıfına ayrı bir
        * cabinClassId verdiğinde buraya eklemek, ad değişse bile filtrenin
        * çalışmasını sağlar. Debug modunda ham yanıttan okunabilir.
        */
       classIds: [],
-      /** Sadece boolean bayrak anahtarları; "disabled" gibi çok anlamlı alanlar bilinçli olarak yok. */
-      flagKeys: /(wheelchair|engelli|ozurlu|özürlü|handicap|tekerlekli|accessib)/i,
+      /**
+       * Sadece boolean bayrak anahtarları. "disabled" ve "accessible" bilinçli
+       * olarak yok: ilki birçok şemada "seçilemez", ikincisi genel erişilebilirlik
+       * anlamına geliyor ve normal kabinleri yanlışlıkla engelli sayıyorlardı.
+       */
+      flagKeys: /(wheelchair|engelli|ozurlu|özürlü|handicap|tekerlekli)/i,
       /** popup'taki vagon tipi seçeneğinin etiketi. */
       optionLabel: "Tekerlekli Sandalye"
     },
